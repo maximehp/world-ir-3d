@@ -23,3 +23,8 @@ main.py
 
 # OS
 .DS_Store
+
+# Video2Sim
+video2sim/uploads/
+video2sim/frontend/node_modules/
+video2sim/frontend/dist/

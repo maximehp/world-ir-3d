@@ -23,6 +23,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Video2Sim 3D (merged from the Harsh branch): video -> 3D simulation, served at /video2sim/
+from fastapi.responses import RedirectResponse  # noqa: E402
+
+from video2sim.backend.main import app as video2sim_app  # noqa: E402
+
+
+@app.get("/video2sim", include_in_schema=False)
+def video2sim_redirect():
+    return RedirectResponse("/video2sim/")
+
+
+app.mount("/video2sim", video2sim_app, name="video2sim")
 app.mount("/world-assets", StaticFiles(directory=str(DATA_ROOT)), name="world-assets")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 

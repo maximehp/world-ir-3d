@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Video2Sim 3D — 2D Video to Interactive 3D Simulation</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <!-- Top Studio Bar -->
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-icon">3D</div>
+          <div>
+            <h1>Video2Sim 3D</h1>
+            <span class="subtitle">OpenCV + Gemini Vision → Live Three.js Simulation</span>
+          </div>
+        </div>
+
+        <div class="topbar-controls">
+          <a href="/" class="btn" title="Open the WorldIR 3D prompt-to-world studio" style="text-decoration:none">← WorldIR Studio</a>
+          <button id="btn-sample" class="btn btn-accent" title="Analyze the bundled sample landscape video">
+            ▶ Load Sample Video
+          </button>
+
+          <label class="btn btn-secondary file-btn">
+            📁 Upload 2D Video
+            <input id="file-input" type="file" accept="video/mp4,video/webm,video/quicktime,video/*" hidden />
+          </label>
+
+          <select id="mode-select" class="select-input" title="Reconstruction engine">
+            <option value="auto">Auto (Gemini AI + OpenCV)</option>
+            <option value="gemini">Gemini Vision AI Only</option>
+            <option value="opencv">Local OpenCV Only</option>
+          </select>
+
+          <div class="api-key-wrap">
+            <input
+              id="api-key-input"
+              type="password"
+              class="text-input"
+              placeholder="Gemini API Key (optional)"
+              autocomplete="off"
+            />
+          </div>
+
+          <button id="btn-analyze" class="btn btn-primary" disabled>
+            ✦ Reconstruct 3D
+          </button>
+        </div>
+      </header>
+
+      <!-- Main Workspace -->
+      <main id="workspace" class="workspace">
+        <!-- 3D Viewport -->
+        <section class="viewport-3d" id="viewport-3d">
+          <canvas id="sim-canvas"></canvas>
+
+          <!-- Status / Loading Overlay -->
+          <div id="loading-overlay" class="loading-overlay hidden">
+            <div class="spinner"></div>
+            <div id="loading-text" class="loading-text">Analyzing 2D video with OpenCV &amp; Gemini Vision...</div>
+            <div id="loading-sub" class="loading-sub">Tracking moving objects &amp; building 3D scene graph</div>
+          </div>
+
+          <!-- Toast / Banner -->
+          <div id="status-banner" class="status-banner hidden"></div>
+
+          <!-- Hint pill -->
+          <div class="hint-pill">
+            Drag to orbit · Scroll to zoom · Right-drag to pan · Click water to drop ripples
+          </div>
+
+          <!-- Picture-in-Picture / Split 2D Source Video Panel -->
+          <aside id="video-panel" class="video-panel hidden">
+            <div class="video-panel-header">
+              <span class="panel-title">2D Source Video</span>
+              <div class="video-panel-actions">
+                <button id="btn-toggle-split" class="icon-btn" title="Toggle Split / PiP View">◫</button>
+                <button id="btn-toggle-sync" class="icon-btn active" title="Sync 3D timeline with 2D video">🔗</button>
+              </div>
+            </div>
+            <video id="source-video" controls loop muted playsinline></video>
+            <div id="video-meta" class="video-meta"></div>
+          </aside>
+
+          <!-- Floating Right Simulation Controls -->
+          <aside class="sim-controls" id="sim-controls">
+            <div class="control-section">
+              <div class="section-label">Camera Presets</div>
+              <div class="preset-grid">
+                <button class="preset-btn active" data-cam="match">2D Match</button>
+                <button class="preset-btn" data-cam="iso">Isometric</button>
+                <button class="preset-btn" data-cam="top">Bird's Eye</button>
+                <button class="preset-btn" data-cam="bird">Follow Bird</button>
+              </div>
+            </div>
+
+            <div class="control-section">
+              <div class="section-label">
+                <span>Time of Day</span>
+                <span id="val-tod" class="val-badge">13:00</span>
+              </div>
+              <input id="slider-tod" type="range" min="0" max="24" step="0.1" value="13.0" />
+            </div>
+
+            <div class="control-section">
+              <div class="section-label">
+                <span>Wind &amp; Sway</span>
+                <span id="val-wind" class="val-badge">0.7x</span>
+              </div>
+              <input id="slider-wind" type="range" min="0" max="2" step="0.05" value="0.7" />
+            </div>
+
+            <div class="control-section">
+              <div class="section-label">
+                <span>Simulation Speed</span>
+                <span id="val-speed" class="val-badge">1.0x</span>
+              </div>
+              <input id="slider-speed" type="range" min="0" max="2.5" step="0.1" value="1.0" />
+            </div>
+
+            <div class="control-section">
+              <div class="section-label">Scene Summary</div>
+              <div id="scene-stats" class="scene-stats">
+                Load the sample video or upload your own 2D video to generate a live 3D simulation.
+              </div>
+              <button id="btn-json" class="btn btn-ghost full-width" disabled>
+                { } Inspect Scene Graph JSON
+              </button>
+            </div>
+          </aside>
+        </section>
+      </main>
+
+      <!-- JSON Inspector Modal -->
+      <div id="json-modal" class="modal hidden">
+        <div class="modal-card">
+          <div class="modal-header">
+            <h3>Reconstructed 3D Scene Graph JSON</h3>
+            <button id="btn-close-json" class="icon-btn">✕</button>
+          </div>
+          <pre id="json-content"></pre>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

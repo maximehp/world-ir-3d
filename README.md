@@ -16,7 +16,20 @@ A full-3D generative world representation and live WebGL2 studio where worlds ar
   - **Gemini 4 Hydrogen (`gemini-4-hydrogen`):** Independently audits a live 4-viewpoint 3D WebGL render plate (Elevated 3/4 Overview, Eye-Level Front, Opposite 180° Back, Hero Close-Up) and can emit bounded spatial fixes.
 - **Real-Time WebGL2 Studio (`world/static/`):** Vendored Three.js `0.170.0`, ACESFilmic tone mapping, 2048px `PCFSoftShadowMap`, dynamic sky-dome PMREM reflections, free **WASD + Mouse Look** walking/flying, 360° orbit + click-to-select, and surgical live hot-patching.
 
-## Quick Start
+## Quick Start (merged prototype)
+
+```bash
+cp .env.example .env   # add GEMINI_API_KEY
+./start.sh             # syncs deps, builds the Video2Sim frontend once, starts the server
+```
+
+- **WorldIR 3D studio** (prompt → persistent 3D world, chat edits): http://127.0.0.1:8000/
+- **Video2Sim 3D** (video → OpenCV tracking + Gemini Vision → Three.js sim, merged from the `Harsh` branch): http://127.0.0.1:8000/video2sim/
+
+Both run in one FastAPI process; Video2Sim's backend (`video2sim/backend`) is mounted as a sub-app at `/video2sim`.
+Run `REBUILD=1 ./start.sh` after editing `video2sim/frontend/src`, or use `cd video2sim/frontend && npm run dev` (Vite on :5173 proxies to :8000) for hot reload.
+
+## Quick Start (WorldIR only)
 
 ```bash
 cp .env.example .env
