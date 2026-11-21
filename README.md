@@ -26,6 +26,23 @@ In the studio, card **1b. 2D Video → 3D World** takes an uploaded video (or th
 
 The result supports everything else: walk mode, surgical chat edits (tracked agents keep their paths), undo, and the Hydrogen audit. API: `POST /api/worlds/from-video` (multipart `file` or `use_sample=true`, optional `hint`).
 
+## Reference Images → World (plans, mood boards, photos, swatches)
+
+Card **0. Reference Images** accepts up to 8 images (pick, drag-drop, or paste with ⌘V, e.g. straight from Pinterest). They apply to the next **Compile**, **Video Reconstruct**, or **Chat Edit**. Gemini 4 Carbon classifies each image and integrates it by role (`world/references.py`):
+
+| Role | How it's integrated |
+|---|---|
+| Floor / site plan | Read top-down (image center = origin, up = north/−Z); rooms/buildings placed at their footprint centroids, sized and wall-aligned, labels become names |
+| Building reference | Matches floors, roof style, proportions, colors on the relevant building (SDF for unusual shapes) |
+| Mood board | Drives the whole world's palette, lighting, atmosphere, vegetation, and materials |
+| Material swatch | Becomes an image-conditioned Nano Banana seamless PBR texture bound to fitting surfaces |
+| Object reference | Added as a sculpted SDF (or closest parametric/agent) focal object |
+| Scene photo | Composition, terrain, and atmosphere reference |
+
+Conflicts resolve as: the prompt decides **what**, plans decide **where**, mood boards decide **how it looks**. Each revision records a plain-English `reference_usage` per image (shown with thumbnails in the edit history), and a persistent `style_guide` keeps later edits on-theme. **Plan View** gives a top-down camera to compare against a plan; views are linkable via `#view=plan|aerial|video`.
+
+API: `POST /api/worlds/compose` (multipart `prompt`, `images[]`), `POST /api/worlds/{id}/edit-with-images` (`instruction`, `selected_object_id`, `images[]`); `/api/worlds/from-video` also accepts `images[]`.
+
 ## Quick Start (merged prototype)
 
 ```bash

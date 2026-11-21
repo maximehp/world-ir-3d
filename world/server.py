@@ -5,6 +5,7 @@ from __future__ import annotations
 import pathlib
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -114,19 +115,77 @@ def create_world(req: CreateWorldReq):
         raise HTTPException(status_code=500, detail=f"World generation failed: {exc}")
 
 
+MAX_REF_IMAGES = 8
+MAX_REF_BYTES = 20 * 1024 * 1024
+
+
+async def _read_reference_images(images: list[UploadFile] | None) -> list[tuple[bytes, str]]:
+    out: list[tuple[bytes, str]] = []
+    for f in (images or [])[:MAX_REF_IMAGES]:
+        if f is None or not f.filename:
+            continue
+        if f.content_type and not f.content_type.startswith("image/"):
+            raise HTTPException(status_code=400, detail=f"'{f.filename}' is not an image")
+        data = await f.read()
+        if len(data) > MAX_REF_BYTES:
+            raise HTTPException(status_code=400, detail=f"'{f.filename}' is larger than 20 MB")
+        out.append((data, f.filename))
+    return out
+
+
+@app.post("/api/worlds/compose")
+async def compose_world(prompt: str = Form(default=""), images: list[UploadFile] = File(default=[])):
+    """Text prompt + reference images (floor/site plans, building photos, mood boards, swatches) -> 3D WorldIR."""
+    refs = await _read_reference_images(images)
+    if not prompt.strip() and not refs:
+        raise HTTPException(status_code=400, detail="Provide a prompt or at least one reference image")
+    try:
+        world = await run_in_threadpool(world_manager.create_world, prompt.strip(), refs)
+        return world.model_dump()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"World generation failed: {exc}")
+
+
+@app.post("/api/worlds/{world_id}/edit-with-images")
+async def edit_world_with_images(
+    world_id: str,
+    instruction: str = Form(default=""),
+    selected_object_id: str = Form(default=""),
+    images: list[UploadFile] = File(default=[]),
+):
+    refs = await _read_reference_images(images)
+    if not instruction.strip() and not refs:
+        raise HTTPException(status_code=400, detail="Provide an instruction or at least one reference image")
+    try:
+        world, delta = await run_in_threadpool(
+            world_manager.apply_edit, world_id, instruction.strip(), selected_object_id or None, refs
+        )
+        return {"world": world.model_dump(), "delta": delta}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"World edit failed: {exc}")
+
+
 VIDEO_SAMPLE = pathlib.Path(__file__).resolve().parent.parent / "video2sim" / "samples" / "sample_landscape_birds.mp4"
 
 
 @app.post("/api/worlds/from-video")
-def create_world_from_video(
+async def create_world_from_video(
     file: UploadFile | None = File(default=None),
     use_sample: bool = Form(default=False),
     hint: str = Form(default=""),
+    images: list[UploadFile] = File(default=[]),
 ):
     """2D video -> OpenCV tracking -> Gemini 4 Carbon reconstruction -> persistent 3D WorldIR with video-path agents."""
     import shutil
     import tempfile
 
+    refs = await _read_reference_images(images)
     if use_sample:
         if not VIDEO_SAMPLE.exists():
             raise HTTPException(status_code=404, detail="Sample video not found")
@@ -142,7 +201,7 @@ def create_world_from_video(
     else:
         raise HTTPException(status_code=400, detail="Upload a video file or set use_sample=true")
     try:
-        world = world_manager.create_world_from_video(src, filename, user_hint=hint.strip())
+        world = await run_in_threadpool(world_manager.create_world_from_video, src, filename, hint.strip(), refs)
         return world.model_dump()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Video world reconstruction failed: {exc}")

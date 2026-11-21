@@ -131,6 +131,23 @@
     .video-pip .pip-head button { padding: 1px 7px; font-size: 11px; }
     .video-pip video { width: 100%; display: block; background: #000; }
     .video-pip.collapsed video { display: none; }
+    .ref-drop {
+      border: 1px dashed var(--border); border-radius: 6px; padding: 9px; text-align: center;
+      font-size: 11.5px; color: var(--muted); cursor: pointer; transition: border-color .15s, background .15s;
+    }
+    .ref-drop.over { border-color: var(--accent); background: rgba(120, 170, 255, 0.08); }
+    .ref-thumbs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin-top: 6px; }
+    .ref-thumbs:empty { display: none; }
+    .ref-thumb { position: relative; aspect-ratio: 1; border-radius: 5px; overflow: hidden; border: 1px solid var(--border); }
+    .ref-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .ref-thumb button {
+      position: absolute; top: 2px; right: 2px; padding: 0 5px; font-size: 11px; line-height: 16px;
+      border-radius: 4px; background: rgba(0,0,0,0.7);
+    }
+    .ref-usage { display: flex; gap: 7px; align-items: flex-start; margin-top: 5px; }
+    .ref-usage img { width: 38px; height: 38px; object-fit: cover; border-radius: 4px; border: 1px solid var(--border); flex: none; }
+    .ref-role { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--accent); }
+    .style-guide { font-size: 11px; color: var(--text); border-left: 2px solid var(--accent); padding: 4px 8px; margin-bottom: 8px; white-space: pre-wrap; }
     .video-drop {
       display: block; width: 100%; box-sizing: border-box; padding: 8px;
       border: 1px dashed var(--border); border-radius: 6px; font-size: 11.5px; color: var(--muted); cursor: pointer;
@@ -289,6 +306,19 @@
     <!-- LEFT: Generate World + Surgical Chat Edits + Saved Worlds -->
     <aside class="sidebar left">
       <div class="card">
+        <div class="card-title">
+          <span>0. Reference Images</span>
+          <span id="refCount" class="pill">0 / 8</span>
+        </div>
+        <label id="refDrop" class="ref-drop">
+          Drop, paste (⌘V) or click to add floor / site plans, building photos, Pinterest mood boards, material swatches or object references.
+          <input type="file" id="refFiles" accept="image/*" multiple hidden />
+        </label>
+        <div id="refThumbs" class="ref-thumbs"></div>
+        <div class="status" style="color:var(--muted);">Gemini 4 Carbon decides how to use each image. They apply to the next Compile, Video Reconstruct, or Chat Edit.</div>
+      </div>
+
+      <div class="card">
         <div class="card-title">1. Generate Full 3D World</div>
         <textarea id="worldPrompt" rows="3" placeholder="Describe any small 3D world with buildings, landmarks, organic sculptures, and moving creatures/vehicles..."></textarea>
         <div class="wrap">
@@ -370,6 +400,7 @@
         <button id="btnCamFront">Front</button>
         <button id="btnCamBack">180° Back</button>
         <button id="btnCamOverview">Aerial 3/4</button>
+        <button id="btnCamPlan" title="Top-down view: compare against a floor / site plan">Plan View</button>
         <button id="btnCamVideo" title="Match the original video camera" hidden>Video Camera</button>
         <button id="btnCamInspect" title="Orbit close around currently selected object">Inspect Selected</button>
         <button id="btnRunAudit" class="primary">Run 4-View Hydrogen Audit</button>

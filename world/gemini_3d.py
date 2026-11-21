@@ -122,15 +122,16 @@ CARBON_WORLD_SYSTEM = (
 )
 
 
-def carbon_compile_world(user_prompt: str) -> tuple[CarbonWorldDraft, float]:
+def carbon_compile_world(user_prompt: str, refs: list | None = None) -> tuple[CarbonWorldDraft, float]:
     """Compile an unseen natural-language prompt into a structured multi-carrier 3D WorldIR."""
     system = CARBON_WORLD_SYSTEM
-    return _call_json_model(
-        CARBON_MODEL,
-        system,
-        f"Design a rich, walkable full-3D world for this prompt:\n{user_prompt}",
-        CarbonWorldDraft,
-    )
+    contents: list = [f"Design a rich, walkable full-3D world for this prompt:\n{user_prompt}"]
+    if refs:
+        from world.references import REFERENCE_CREATE_ADDENDUM, reference_parts
+
+        system = system + REFERENCE_CREATE_ADDENDUM
+        contents += reference_parts(refs)
+    return _call_json_model(CARBON_MODEL, system, contents, CarbonWorldDraft)
 
 
 # ---------------------------------------------------------------------------
@@ -141,6 +142,7 @@ def carbon_compile_world_edit(
     world: WorldState,
     instruction: str,
     selected_object_id: str | None = None,
+    refs: list | None = None,
 ) -> tuple[CarbonWorldEditPatch, float]:
     """Compile a natural-language chat edit into a minimal surgical WorldEditPatch.
 
@@ -164,11 +166,13 @@ def carbon_compile_world_edit(
         "6. VIDEO-TRACKED AGENTS: agents with `behavior.kind='follow_video_path'` replay a motion path tracked from the source video (`behavior.video_track_id`). "
         "When restyling/rescaling them keep their behavior untouched. Only change their behavior if the user explicitly asks them to stop following the video path. "
         "New agents may reuse an existing `video_track_id` listed in `video_track_ids` to follow the same tracked motion.\n"
-        "7. If `selected_object_id` is provided and the user says 'this', 'it', or 'selected object', target `selected_object_id`."
+        "7. STYLE CONSISTENCY: if `style_guide` is non-empty, every added or restyled object must follow it (palette, materials, architecture).\n"
+        "8. If `selected_object_id` is provided and the user says 'this', 'it', or 'selected object', target `selected_object_id`."
     )
 
     compact_world = {
         "title": world.title,
+        "style_guide": world.style_guide,
         "selected_object_id": selected_object_id,
         "atmosphere": world.atmosphere.model_dump(),
         "terrain": {
@@ -199,12 +203,13 @@ def carbon_compile_world_edit(
         ],
     }
 
-    return _call_json_model(
-        CARBON_MODEL,
-        system,
-        f"Current Persistent 3D World State:\n{json.dumps(compact_world, indent=2)}\n\nUser chat edit:\n{instruction}",
-        CarbonWorldEditPatch,
-    )
+    contents: list = [f"Current Persistent 3D World State:\n{json.dumps(compact_world, indent=2)}\n\nUser chat edit:\n{instruction}"]
+    if refs:
+        from world.references import REFERENCE_EDIT_ADDENDUM, reference_parts
+
+        system = system + REFERENCE_EDIT_ADDENDUM
+        contents += reference_parts(refs)
+    return _call_json_model(CARBON_MODEL, system, contents, CarbonWorldEditPatch)
 
 
 # ---------------------------------------------------------------------------

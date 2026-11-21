@@ -175,6 +175,7 @@ const state = {
   walkPitch: -0.06,
   keys: new Set(),
   videoTime: 0,
+  refFiles: [],
 };
 const srcVideoEl = document.getElementById("srcVideo");
 
@@ -473,6 +474,72 @@ function syncSourceVideo(world) {
     srcVideoEl.src = sv.url;
     srcVideoEl.play().catch(() => {});
   }
+}
+
+// ---------------------------------------------------------------------------
+// Reference images tray (plans, mood boards, photos, swatches) shared by Compile / Video / Edit
+// ---------------------------------------------------------------------------
+const MAX_REFS = 8;
+function renderRefTray() {
+  const box = document.getElementById("refThumbs");
+  box.innerHTML = "";
+  state.refFiles.forEach((f, i) => {
+    const el = document.createElement("div");
+    el.className = "ref-thumb";
+    el.title = f.name;
+    const img = document.createElement("img");
+    img.src = f._url || (f._url = URL.createObjectURL(f));
+    const x = document.createElement("button");
+    x.type = "button";
+    x.textContent = "×";
+    x.onclick = e => {
+      e.preventDefault();
+      URL.revokeObjectURL(f._url);
+      state.refFiles.splice(i, 1);
+      renderRefTray();
+    };
+    el.append(img, x);
+    box.appendChild(el);
+  });
+  document.getElementById("refCount").textContent = `${state.refFiles.length} / ${MAX_REFS}`;
+}
+function addRefFiles(files) {
+  for (const f of files) {
+    if (!f.type.startsWith("image/") || state.refFiles.length >= MAX_REFS) continue;
+    state.refFiles.push(f);
+  }
+  renderRefTray();
+}
+function clearRefFiles() {
+  state.refFiles.forEach(f => f._url && URL.revokeObjectURL(f._url));
+  state.refFiles = [];
+  renderRefTray();
+}
+function appendRefs(form) {
+  state.refFiles.forEach(f => form.append("images", f, f.name || "pasted.png"));
+}
+(() => {
+  const drop = document.getElementById("refDrop");
+  const input = document.getElementById("refFiles");
+  input.onchange = () => { addRefFiles(input.files); input.value = ""; };
+  ["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
+  ["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
+  drop.addEventListener("drop", e => addRefFiles(e.dataTransfer.files));
+  window.addEventListener("paste", e => {
+    const imgs = [...(e.clipboardData?.items || [])].filter(it => it.type.startsWith("image/")).map(it => it.getAsFile()).filter(Boolean);
+    if (imgs.length) { e.preventDefault(); addRefFiles(imgs); }
+  });
+})();
+
+function renderRefUsage(w, rev) {
+  if (!rev.reference_usage?.length) return "";
+  const imgs = w.reference_images || [];
+  return `<div style="margin-top:6px;"><b style="font-size:11px;">Reference images used:</b>` + rev.reference_usage.map(u => {
+    const ri = imgs.find(r => r.revision === rev.revision && r.image_index === u.image_index);
+    const role = u.role.replace(/_/g, " ");
+    return `<div class="ref-usage">${ri ? `<a href="${ri.url}" target="_blank"><img src="${ri.url}" alt=""/></a>` : ""}
+      <div><div class="ref-role">#${u.image_index} · ${role}</div><div style="font-size:11px;">${u.how_used}</div></div></div>`;
+  }).join("") + `</div>`;
 }
 
 function updateAutonomousWorld(t, dt) {
@@ -1184,6 +1251,13 @@ function renderSidebars() {
 
   const hist = document.getElementById("historyBox");
   hist.innerHTML = "";
+  if (w.style_guide) {
+    const sg = document.createElement("div");
+    sg.className = "style-guide";
+    sg.innerHTML = `<b>Art direction</b> (kept consistent across edits)<br/>`;
+    sg.appendChild(document.createTextNode(w.style_guide));
+    hist.appendChild(sg);
+  }
   for (const rev of [...w.history].reverse()) {
     const el = document.createElement("div");
     el.className = "rev-item";
@@ -1199,6 +1273,7 @@ function renderSidebars() {
         Changed: [${rev.changed_object_ids.join(", ") || "env"}] | NB tex: ${rev.costs.nano_banana_texture_calls} | SDF: ${rev.costs.sdf_meshes_compiled}<br/>
         Time: ${(t.total_ms / 1000).toFixed(1)}s (Carbon ${t.carbon_ms.toFixed(0)}ms, NB ${t.nano_banana_ms.toFixed(0)}ms, SDF ${t.sdf_compile_ms.toFixed(0)}ms)
       </div>
+      ${renderRefUsage(w, rev)}
     `;
     hist.appendChild(el);
   }
@@ -1265,16 +1340,28 @@ document.querySelectorAll(".edit-chip").forEach(b => {
 
 document.getElementById("btnGenerate").onclick = async () => {
   const prompt = document.getElementById("worldPrompt").value.trim();
-  if (!prompt) return;
-  setBusy(true, "genStatus", "Gemini 4 Carbon compiling 3D WorldIR -> Nano Banana PBR -> Marching Cubes SDF...");
+  const nRefs = state.refFiles.length;
+  if (!prompt && !nRefs) return;
+  setBusy(true, "genStatus", nRefs
+    ? `Gemini 4 Carbon reading ${nRefs} reference image(s) + prompt -> 3D WorldIR -> Nano Banana PBR -> Marching Cubes SDF...`
+    : "Gemini 4 Carbon compiling 3D WorldIR -> Nano Banana PBR -> Marching Cubes SDF...");
   try {
-    const r = await fetch("/api/worlds", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt }),
-    });
+    let r;
+    if (nRefs) {
+      const form = new FormData();
+      form.append("prompt", prompt);
+      appendRefs(form);
+      r = await fetch("/api/worlds/compose", { method: "POST", body: form });
+    } else {
+      r = await fetch("/api/worlds", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      });
+    }
     const world = await r.json();
     if (!r.ok) throw new Error(world.detail || "Generation failed");
+    if (nRefs) clearRefFiles();
     await loadFullWorld(world, true);
     await refreshWorldsList();
     setBusy(true, "genStatus", "Running independent 4-Viewpoint Gemini 4 Hydrogen spatial audit...");
@@ -1295,6 +1382,8 @@ async function reconstructFromVideo(useSample) {
   const form = new FormData();
   if (useSample) form.append("use_sample", "true"); else form.append("file", file);
   form.append("hint", document.getElementById("videoHint").value.trim());
+  const nRefs = state.refFiles.length;
+  appendRefs(form);
   const t0 = performance.now();
   setBusy(true, "videoStatus", "OpenCV tracking moving objects -> Gemini 4 Carbon reconstructing the 3D scene from frames -> lifting tracks to 3D paths... (1-3 min)");
   const tick = setInterval(() => {
@@ -1304,6 +1393,7 @@ async function reconstructFromVideo(useSample) {
     const r = await fetch("/api/worlds/from-video", { method: "POST", body: form });
     const world = await r.json();
     if (!r.ok) throw new Error(world.detail || "Reconstruction failed");
+    if (nRefs) clearRefFiles();
     await loadFullWorld(world, true);
     await refreshWorldsList();
     const nTracks = world.source_video?.tracks?.length || 0;
@@ -1325,16 +1415,29 @@ document.getElementById("btnPipToggle").onclick = () => {
 document.getElementById("btnApplyEdit").onclick = async () => {
   if (!state.world) return;
   const instruction = document.getElementById("chatEdit").value.trim();
-  if (!instruction) return;
-  setBusy(true, "editStatus", "Gemini 4 Carbon compiling surgical 3D WorldDiff (unrelated objects preserved)...");
+  const nRefs = state.refFiles.length;
+  if (!instruction && !nRefs) return;
+  setBusy(true, "editStatus", nRefs
+    ? `Gemini 4 Carbon integrating ${nRefs} reference image(s) as a surgical 3D WorldDiff...`
+    : "Gemini 4 Carbon compiling surgical 3D WorldDiff (unrelated objects preserved)...");
   try {
-    const r = await fetch(`/api/worlds/${state.world.world_id}/edit`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ instruction, selected_object_id: state.selectedId }),
-    });
+    let r;
+    if (nRefs) {
+      const form = new FormData();
+      form.append("instruction", instruction);
+      if (state.selectedId) form.append("selected_object_id", state.selectedId);
+      appendRefs(form);
+      r = await fetch(`/api/worlds/${state.world.world_id}/edit-with-images`, { method: "POST", body: form });
+    } else {
+      r = await fetch(`/api/worlds/${state.world.world_id}/edit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instruction, selected_object_id: state.selectedId }),
+      });
+    }
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || "Edit failed");
+    if (nRefs) clearRefFiles();
     await applySurgicalDelta(data.world, data.delta);
     await refreshWorldsList();
     setBusy(false, "editStatus", `Rev ${data.world.revision}: ${data.delta.action} (${data.delta.changed_object_ids.length} mutated, ${data.delta.unchanged_object_ids.length} preserved).`);
@@ -1459,6 +1562,20 @@ document.getElementById("btnCamVideo").onclick = () => {
   setCameraMode("orbit");
   setOrbitFromLook(new THREE.Vector3(...sv.camera_pos), new THREE.Vector3(...sv.camera_look_at));
 };
+function setPlanView() {
+  setCameraMode("orbit");
+  const half = (state.world?.terrain?.size || 72) * 0.36;
+  setOrbitFromLook(new THREE.Vector3(0, half * 1.9, 1.2), new THREE.Vector3(0, 0, 0));
+}
+document.getElementById("btnCamPlan").onclick = setPlanView;
+// Linkable views: #view=plan | aerial | video
+function applyHashView() {
+  const v = new URLSearchParams(location.hash.slice(1)).get("view");
+  if (v === "plan") setPlanView();
+  else if (v === "aerial") document.getElementById("btnCamOverview").click();
+  else if (v === "video") document.getElementById("btnCamVideo").click();
+}
+window.addEventListener("hashchange", applyHashView);
 document.getElementById("btnCamInspect").onclick = () => {
   if (state.selectedId) inspectObject(state.selectedId);
 };
@@ -1523,4 +1640,4 @@ function animate(now) {
   requestAnimationFrame(animate);
 }
 
-refreshWorldsList().then(() => requestAnimationFrame(animate));
+refreshWorldsList().then(() => { applyHashView(); requestAnimationFrame(animate); });

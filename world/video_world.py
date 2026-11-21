@@ -57,7 +57,9 @@ VIDEO_SYSTEM_ADDENDUM = (
 )
 
 
-def compile_world_from_video(artifacts: VideoAnalysisArtifacts, user_hint: str = "") -> tuple[CarbonVideoWorldDraft, float]:
+def compile_world_from_video(
+    artifacts: VideoAnalysisArtifacts, user_hint: str = "", refs: list | None = None
+) -> tuple[CarbonVideoWorldDraft, float]:
     md = artifacts.metadata
     traj_summary = []
     for tr in artifacts.trajectories:
@@ -87,7 +89,14 @@ def compile_world_from_video(artifacts: VideoAnalysisArtifacts, user_hint: str =
         contents.append(types.Part.from_text(text=f"Keyframe at t={ts}s:"))
         contents.append(types.Part.from_bytes(data=jpeg, mime_type="image/jpeg"))
 
-    return _call_json_model(CARBON_MODEL, CARBON_WORLD_SYSTEM + VIDEO_SYSTEM_ADDENDUM, contents, CarbonVideoWorldDraft)
+    system = CARBON_WORLD_SYSTEM + VIDEO_SYSTEM_ADDENDUM
+    if refs:
+        from world.references import REFERENCE_CREATE_ADDENDUM, reference_parts
+
+        system += REFERENCE_CREATE_ADDENDUM
+        contents.append(types.Part.from_text(text="The user also attached these reference images:"))
+        contents += reference_parts(refs)
+    return _call_json_model(CARBON_MODEL, system, contents, CarbonVideoWorldDraft)
 
 
 # ---------------------------------------------------------------------------

@@ -33,6 +33,7 @@ from world.schema import (
     WorldState,
     WorldTimings,
 )
+from world.references import prepare_reference_images, record_references, save_reference_images
 from world.sdf_compiler import compile_sdf_mesh
 from world.textures import ensure_ao_for_existing_albedo, synthesize_pbr_texture
 
@@ -110,6 +111,7 @@ class WorldManager:
         requests: list[TextureRequest],
         costs: WorldCosts,
         timings: WorldTimings,
+        refs: list | None = None,
     ) -> dict[str, PBRTextureAsset]:
         if not requests:
             return {}
@@ -118,7 +120,12 @@ class WorldManager:
         t0 = time.perf_counter()
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
             futs = {
-                pool.submit(synthesize_pbr_texture, tr.id, tr.prompt, wdir, 512): tr
+                pool.submit(
+                    synthesize_pbr_texture, tr.id, tr.prompt, wdir, 512,
+                    refs[tr.reference_image_index].jpeg
+                    if refs and tr.reference_image_index is not None and 0 <= tr.reference_image_index < len(refs)
+                    else None,
+                ): tr
                 for tr in requests
             }
             for fut in concurrent.futures.as_completed(futs):
@@ -171,20 +178,25 @@ class WorldManager:
             obj.id = cand
             seen.add(cand)
 
-    def create_world(self, prompt: str) -> WorldState:
-        """Compile an unseen natural-language prompt into a full multi-carrier 3D world."""
+    def create_world(self, prompt: str, images: list[tuple[bytes, str]] | None = None) -> WorldState:
+        """Compile an unseen natural-language prompt (+ optional reference images) into a full multi-carrier 3D world."""
+        refs = prepare_reference_images(images or [])
+        if not prompt.strip():
+            prompt = "Design a world from the attached reference images."
         t0 = time.perf_counter()
         world_id = _new_id("w3d")
         costs = WorldCosts()
         timings = WorldTimings()
 
         # 1. Gemini 4 Carbon compiles structured multi-carrier 3D WorldDraft
-        draft, c_ms = carbon_compile_world(prompt)
+        draft, c_ms = carbon_compile_world(prompt, refs=refs)
         costs.carbon_calls += 1
         timings.carbon_ms += round(c_ms, 1)
-        return self._finalize_new_world(world_id, prompt, draft, costs, timings, t0)
+        return self._finalize_new_world(world_id, prompt, draft, costs, timings, t0, refs=refs)
 
-    def create_world_from_video(self, video_path: str, filename: str, user_hint: str = "") -> WorldState:
+    def create_world_from_video(
+        self, video_path: str, filename: str, user_hint: str = "", images: list[tuple[bytes, str]] | None = None
+    ) -> WorldState:
         """Reconstruct a persistent, editable 3D WorldIR from a 2D video (Video2Sim OpenCV + Gemini 4 Carbon)."""
         import shutil
 
@@ -204,7 +216,8 @@ class WorldManager:
         artifacts = analyze_video_opencv(video_path=str(stored), filename=filename, video_url=video_url)
         (self._wdir(world_id) / "video_background.jpg").write_bytes(artifacts.background_jpeg)
 
-        draft, c_ms = compile_world_from_video(artifacts, user_hint)
+        refs = prepare_reference_images(images or [])
+        draft, c_ms = compile_world_from_video(artifacts, user_hint, refs=refs)
         costs.carbon_calls += 1
         timings.carbon_ms += round(c_ms, 1)
 
@@ -223,13 +236,13 @@ class WorldManager:
             tracks=tracks3d,
         )
         prompt = f"[video] {filename}" + (f" — {user_hint}" if user_hint else "")
-        return self._finalize_new_world(world_id, prompt, draft, costs, timings, t0, source_video=source_video)
+        return self._finalize_new_world(world_id, prompt, draft, costs, timings, t0, source_video=source_video, refs=refs)
 
-    def _finalize_new_world(self, world_id, prompt, draft, costs, timings, t0, source_video=None) -> WorldState:
+    def _finalize_new_world(self, world_id, prompt, draft, costs, timings, t0, source_video=None, refs=None) -> WorldState:
         self._sanitize_object_ids(draft.objects)
 
         # 2. Synthesize Nano Banana PBR textures (parallel) + compile Marching Cubes SDF meshes (~9ms each)
-        textures = self._compile_textures_parallel(world_id, draft.texture_requests, costs, timings)
+        textures = self._compile_textures_parallel(world_id, draft.texture_requests, costs, timings, refs=refs)
         self._compile_sdf_objects(world_id, draft.objects, costs, timings)
 
         # Validate texture_id references so missing failed textures fall back cleanly to procedural shading
@@ -255,11 +268,19 @@ class WorldManager:
             camera_spawn=draft.camera_spawn,
             camera_look_at=draft.camera_look_at,
             source_video=source_video,
+            style_guide=draft.style_guide,
         )
+        ref_usage = []
+        if refs:
+            names = save_reference_images(self._wdir(world_id), refs, revision=1)
+            ref_usage = record_references(
+                world, refs, [self._asset_url(world_id, n) for n in names], draft.reference_usage, revision=1
+            )
         world.history.append(
             WorldRevision(
                 revision=1,
                 action="create_world_from_video" if source_video else "create_world",
+                reference_usage=ref_usage,
                 instruction=prompt,
                 carbon_summary=draft.summary,
                 changed_object_ids=[o.id for o in world.objects],
@@ -279,6 +300,7 @@ class WorldManager:
         world_id: str,
         instruction: str,
         selected_object_id: str | None = None,
+        images: list[tuple[bytes, str]] | None = None,
     ) -> tuple[WorldState, dict]:
         """Apply a surgical natural-language edit, returning updated WorldState and delta summary for hot-patching."""
         t0 = time.perf_counter()
@@ -288,12 +310,15 @@ class WorldManager:
         timings = WorldTimings()
 
         # 1. Gemini 4 Carbon compiles minimal surgical diff
-        patch, c_ms = carbon_compile_world_edit(world, instruction, selected_object_id=selected_object_id)
+        refs = prepare_reference_images(images or [])
+        if not instruction.strip():
+            instruction = "Integrate the attached reference images into this world."
+        patch, c_ms = carbon_compile_world_edit(world, instruction, selected_object_id=selected_object_id, refs=refs)
         costs.carbon_calls += 1
         timings.carbon_ms += round(c_ms, 1)
 
         # 2. Synthesize ONLY newly requested Nano Banana PBR textures (0 calls if none needed!)
-        new_tex = self._compile_textures_parallel(world_id, patch.new_texture_requests, costs, timings)
+        new_tex = self._compile_textures_parallel(world_id, patch.new_texture_requests, costs, timings, refs=refs)
         world.textures.update(new_tex)
         valid_tex = set(world.textures.keys())
 
@@ -386,12 +411,21 @@ class WorldManager:
         unchanged_ids = [o.id for o in world.objects if o.visible and o.id not in changed_ids]
 
         world.revision += 1
+        if patch.new_style_guide:
+            world.style_guide = patch.new_style_guide
+        ref_usage = []
+        if refs:
+            names = save_reference_images(self._wdir(world_id), refs, revision=world.revision)
+            ref_usage = record_references(
+                world, refs, [self._asset_url(world_id, n) for n in names], patch.reference_usage, revision=world.revision
+            )
         timings.total_ms = round((time.perf_counter() - t0) * 1000.0, 1)
         world.cumulative_costs = _add_costs(world.cumulative_costs, costs)
         world.history.append(
             WorldRevision(
                 revision=world.revision,
                 action=patch.action,
+                reference_usage=ref_usage,
                 instruction=instruction,
                 carbon_summary=patch.summary,
                 changed_object_ids=changed_ids,

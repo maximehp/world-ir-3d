@@ -101,6 +101,7 @@ def synthesize_pbr_texture(
     material_prompt: str,
     out_dir: pathlib.Path,
     size: int = 512,
+    reference_jpeg: bytes | None = None,
 ) -> tuple[dict, float]:
     """Generate a seamless tileable PBR texture set (albedo + normal + roughness + AO) via Nano Banana 2.1."""
     client = _get_client()
@@ -110,10 +111,17 @@ def synthesize_pbr_texture(
         "crisp natural tactile micro-detail, NO directional shadows, NO perspective distortion, "
         "NO objects or borders, edge-to-edge repeating material pattern."
     )
+    contents: list = [full_prompt]
+    if reference_jpeg:
+        # Image-conditioned: extract the material from the user's swatch / mood board as a seamless tile
+        contents = [
+            types.Part.from_bytes(data=reference_jpeg, mime_type="image/jpeg"),
+            "Extract the surface material shown in this reference image (matching its colors, pattern and texture). " + full_prompt,
+        ]
     t0 = time.perf_counter()
     resp = client.models.generate_content(
         model=NANO_BANANA_MODEL,
-        contents=full_prompt,
+        contents=contents,
         config=types.GenerateContentConfig(response_modalities=["IMAGE"]),
     )
     ms = (time.perf_counter() - t0) * 1000.0

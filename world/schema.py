@@ -229,6 +229,28 @@ class MultiViewAuditVerdict(BaseModel):
     multiview_plate_url: str | None = None
 
 
+ReferenceRole = Literal[
+    "site_or_floor_plan", "building_reference", "mood_board", "material_swatch", "object_reference", "scene_photo", "other"
+]
+
+
+class ReferenceUsage(BaseModel):
+    """How Carbon interpreted and integrated one user-supplied reference image."""
+    image_index: int = Field(..., ge=0, description="0-based index of the reference image in the order given")
+    role: ReferenceRole
+    how_used: str = Field(..., description="1-2 plain-English sentences explaining what was taken from the image and where it went in the world")
+    affected_object_ids: list[str] = Field(default_factory=list)
+
+
+class ReferenceImage(BaseModel):
+    url: str
+    filename: str
+    revision: int = 1
+    image_index: int = 0
+    role: ReferenceRole = "other"
+    how_used: str = ""
+
+
 class WorldRevision(BaseModel):
     revision: int
     action: str
@@ -240,6 +262,7 @@ class WorldRevision(BaseModel):
     costs: WorldCosts = Field(default_factory=WorldCosts)
     timings: WorldTimings = Field(default_factory=WorldTimings)
     audit: MultiViewAuditVerdict | None = None
+    reference_usage: list[ReferenceUsage] = Field(default_factory=list)
 
 
 class VideoTrack3D(BaseModel):
@@ -279,6 +302,8 @@ class WorldState(BaseModel):
     camera_spawn: list[float] = Field(default=[0.0, 3.2, 22.0], min_length=3, max_length=3)
     camera_look_at: list[float] = Field(default=[0.0, 2.5, 0.0], min_length=3, max_length=3)
     source_video: SourceVideo | None = None
+    style_guide: str = Field(default="", description="Persistent art direction distilled from prompt + reference images (palette, materials, architecture, mood)")
+    reference_images: list[ReferenceImage] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -288,6 +313,7 @@ class WorldState(BaseModel):
 class TextureRequest(BaseModel):
     id: str = Field(..., description="Short snake_case texture id, e.g. 'sandstone_wall', 'cobblestone_ground'")
     prompt: str = Field(..., description="Seamless tileable top-down PBR material texture prompt for Nano Banana")
+    reference_image_index: int | None = Field(default=None, description="If this material should be extracted from a user reference image (material swatch / mood board surface), its 0-based index; otherwise null")
 
 
 class CarbonWorldDraft(BaseModel):
@@ -299,6 +325,8 @@ class CarbonWorldDraft(BaseModel):
     objects: list[WorldObject] = Field(..., min_length=5, max_length=26)
     camera_spawn: list[float] = Field(default=[0.0, 3.5, 22.0], min_length=3, max_length=3)
     camera_look_at: list[float] = Field(default=[0.0, 2.5, 0.0], min_length=3, max_length=3)
+    style_guide: str = Field(default="", description="Concise art direction (palette hexes, materials, architecture rules, mood). Required when reference images are given")
+    reference_usage: list[ReferenceUsage] = Field(default_factory=list, description="One entry per reference image; empty if none were given")
 
 
 class VideoTrackBinding(BaseModel):
@@ -343,6 +371,8 @@ class CarbonWorldEditPatch(BaseModel):
     remove_object_ids: list[str] = Field(default_factory=list)
     new_atmosphere: AtmosphereSpec | None = None
     new_terrain: TerrainSpec | None = None
+    reference_usage: list[ReferenceUsage] = Field(default_factory=list, description="One entry per reference image attached to this edit; empty if none")
+    new_style_guide: str | None = Field(default=None, description="Updated style guide if the edit (e.g. a new mood board) changes the world's art direction; else null")
 
 
 class Hydrogen3DAuditResponse(BaseModel):
