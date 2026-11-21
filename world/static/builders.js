@@ -27,9 +27,9 @@ function smoothstep(e0, e1, x) {
 
 export function sampleTerrainHeight(terrain, x, z) {
   const r = Math.hypot(x, z);
-  const pr = terrain.plaza_radius || 15.0;
-  const hh = terrain.hill_height ?? 3.0;
-  const hillMask = smoothstep(pr * 0.85, pr * 1.6, r);
+  const pr = terrain.plaza_radius ?? (terrain.style === "plain" ? 0 : 15);
+  const hh = terrain.hill_height ?? (terrain.style === "plain" ? 0 : 3);
+  const hillMask = pr > 0 ? smoothstep(pr * 0.85, pr * 1.6, r) : 1;
 
   const n1 = Math.sin(x * 0.085 + 0.4) * Math.cos(z * 0.085 - 0.3);
   const n2 = Math.sin(x * 0.17 - z * 0.14 + 1.2) * 0.45;
@@ -37,7 +37,8 @@ export function sampleTerrainHeight(terrain, x, z) {
   let h = (n1 * 0.5 + n2 * 0.35 + n3 * 0.35 + 0.45) * hh * hillMask;
 
   if (terrain.has_water && terrain.style === "coastal_harbor") {
-    const seaBlend = smoothstep(pr * 0.55, pr * 1.15, z);
+    const shoreScale = pr > 0 ? pr : (terrain.size ?? 72) * 0.2;
+    const seaBlend = smoothstep(shoreScale * 0.55, shoreScale * 1.15, z);
     h = h * (1.0 - seaBlend) + (terrain.water_level - 1.2) * seaBlend;
   } else if (terrain.has_water) {
     const stream = Math.abs(z - Math.sin(x * 0.12) * 5.0 - pr * 0.85);
@@ -269,7 +270,8 @@ export function buildTerrain(terrain, texturesDict) {
   const cPlaza = new THREE.Color(terrain.ground_color || "#8a8275");
   const cHill = new THREE.Color(terrain.hill_color || "#4f6d3f");
   const cTmp = new THREE.Color();
-  const pr = terrain.plaza_radius || 15.0;
+  const pr = terrain.plaza_radius ?? (terrain.style === "plain" ? 0 : 15);
+  const hillHeight = terrain.hill_height ?? (terrain.style === "plain" ? 0 : 3);
 
   const hasDualTex = Boolean(terrain.texture_id && texturesDict[terrain.texture_id] && terrain.hill_texture_id && texturesDict[terrain.hill_texture_id]);
 
@@ -279,10 +281,13 @@ export function buildTerrain(terrain, texturesDict) {
     const y = sampleTerrainHeight(terrain, x, z);
     pos.setY(i, y);
 
-    const r = Math.hypot(x, z);
-    // Natural organic wobble along plaza perimeter so hill transition looks organic
-    const wobble = Math.sin(Math.atan2(z, x) * 7.0) * 0.65 + Math.cos(x * 0.35) * 0.45;
-    const blend = smoothstep(pr * 0.80 + wobble, pr * 1.18 + wobble, r);
+    let blend = 0;
+    if (pr > 0) {
+      const wobble = Math.sin(Math.atan2(z, x) * 7.0) * 0.65 + Math.cos(x * 0.35) * 0.45;
+      blend = smoothstep(pr * 0.80 + wobble, pr * 1.18 + wobble, Math.hypot(x, z));
+    } else if (hillHeight > 0) {
+      blend = smoothstep(0, hillHeight, y);
+    }
     splatWeight[i] = blend;
 
     const micro = 0.93 + 0.07 * Math.sin(x * 0.85) * Math.cos(z * 0.85);
@@ -350,7 +355,7 @@ export function buildTerrain(terrain, texturesDict) {
   group.add(mesh);
 
   // Segmented natural cut-stone plaza curb blocks (instead of bare plastic torus!)
-  if (terrain.style === "cobblestone_plaza") {
+  if (pr > 0 && terrain.style === "cobblestone_plaza") {
     const curbMat = plazaTex
       ? createPBRMaterial({ color: "#b7ab98", roughness: 0.88, texture_id: terrain.texture_id }, texturesDict, { repeat: 0.8, tintWeight: 0.35 })
       : new THREE.MeshStandardMaterial({ color: "#a59b8b", roughness: 0.9 });
@@ -1725,9 +1730,24 @@ function buildPlatform(obj, texturesDict) {
   return enableShadows(g);
 }
 
+function buildPrimitive(obj, texturesDict) {
+  const { shape, width, height, depth } = obj.parametric;
+  let geometry;
+  switch (shape) {
+    case "sphere": geometry = new THREE.SphereGeometry(0.5, 32, 20); break;
+    case "cylinder": geometry = new THREE.CylinderGeometry(0.5, 0.5, 1, 32); break;
+    case "cone": geometry = new THREE.ConeGeometry(0.5, 1, 32); break;
+    default: geometry = new THREE.BoxGeometry(1, 1, 1); break;
+  }
+  geometry.scale(width, height, depth);
+  geometry.translate(0, height / 2, 0);
+  return enableShadows(new THREE.Mesh(geometry, createPBRMaterial(obj.material, texturesDict)));
+}
+
 export function buildParametricObject(obj, texturesDict, isNight) {
-  const k = obj.parametric?.kind || "building";
+  const k = obj.parametric?.kind;
   switch (k) {
+    case "primitive": return buildPrimitive(obj, texturesDict);
     case "building": return buildBuilding(obj, texturesDict, isNight);
     case "tower": return buildTower(obj, texturesDict, isNight);
     case "domed_hall": return buildDomedHall(obj, texturesDict);
@@ -1747,7 +1767,7 @@ export function buildParametricObject(obj, texturesDict, isNight) {
     case "scooter":
     case "car":
     case "boat": return buildSculptedVehicle(k, obj.material, texturesDict);
-    default: return buildBuilding(obj, texturesDict, isNight);
+    default: throw new Error(`Missing or unsupported parametric geometry on ${obj.id}: ${k}`);
   }
 }
 
@@ -1994,7 +2014,7 @@ export function buildArticulatedAgent(obj, texturesDict) {
     root.userData.flockMembers = members;
   } else if (ag.rig_kind === "floating_lanterns") {
     const members = [];
-    const n = Math.max(2, Math.min(14, ag.count || 6));
+    const n = Math.max(1, Math.min(14, ag.count ?? 1));
     const paperMat = new THREE.MeshStandardMaterial({
       color: obj.material.color || "#ff9e44",
       emissive: new THREE.Color(obj.material.color || "#ff9e44").lerp(new THREE.Color(obj.material.accent_color || "#ffae3d"), 0.35),

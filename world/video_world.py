@@ -39,7 +39,7 @@ VIDEO_SYSTEM_ADDENDUM = (
     "You are reconstructing the REAL scene shown in a 2D video as a persistent, walkable 3D WorldIR.\n"
     "Image 1 is the clean static background (moving objects removed by temporal median). The following images are keyframes "
     "showing the moving objects. OpenCV tracked trajectories are given in normalized image coords (u: 0 left..1 right, v: 0 top..1 bottom).\n\n"
-    "FIDELITY RULES (override the generic village/plaza defaults above whenever the video differs):\n"
+    "RECONSTRUCTION FIDELITY RULES:\n"
     "- Match the video: terrain style, water (has_water/water_color if there is a lake/sea/river), ground & hill colors, "
     "time of day, sky zenith/horizon colors, sun direction, fog. Sample colors from the actual pixels.\n"
     "- Recreate the static things you SEE (houses, trees, mountains/hills, towers, bridges, boats, lamps, fences, etc.) using the best-fitting "

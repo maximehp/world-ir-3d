@@ -19,9 +19,9 @@ from pydantic import BaseModel, Field
 # ---------------------------------------------------------------------------
 
 class MaterialSpec(BaseModel):
-    color: str = Field(default="#c8b8a2", description="Primary hex color")
-    secondary_color: str = Field(default="#6e4a38", description="Roof / trim / accent hex color")
-    accent_color: str = Field(default="#ffd584", description="Window glow / metal / foliage accent hex color")
+    color: str = Field(default="#b0b0b0", description="Primary hex color")
+    secondary_color: str = Field(default="#808080", description="Secondary surface hex color")
+    accent_color: str = Field(default="#cccccc", description="Detail hex color")
     roughness: float = Field(default=0.72, ge=0.05, le=1.0)
     metalness: float = Field(default=0.05, ge=0.0, le=1.0)
     emissive: str = Field(default="#000000", description="Optional emissive glow hex")
@@ -47,11 +47,11 @@ class PBRTextureAsset(BaseModel):
 
 class TerrainSpec(BaseModel):
     size: float = Field(default=72.0, ge=36.0, le=140.0)
-    style: Literal["cobblestone_plaza", "meadow_hills", "coastal_harbor", "snowy_valley", "desert_oasis", "forest_clearing"] = "cobblestone_plaza"
-    ground_color: str = "#8a8275"
-    hill_color: str = "#4f6d3f"
-    plaza_radius: float = Field(default=15.0, ge=4.0, le=32.0, description="Flat central village/courtyard radius in meters")
-    hill_height: float = Field(default=3.2, ge=0.0, le=12.0)
+    style: Literal["plain", "cobblestone_plaza", "meadow_hills", "coastal_harbor", "snowy_valley", "desert_oasis", "forest_clearing"] = "plain"
+    ground_color: str = "#858585"
+    hill_color: str = "#858585"
+    plaza_radius: float = Field(default=0.0, ge=0.0, le=32.0, description="Radius of an explicitly requested flat central area in meters; zero leaves the terrain unzoned")
+    hill_height: float = Field(default=0.0, ge=0.0, le=12.0)
     has_water: bool = False
     water_level: float = Field(default=-0.4, ge=-3.0, le=2.0)
     water_color: str = "#2a6f8f"
@@ -60,18 +60,18 @@ class TerrainSpec(BaseModel):
 
 
 class AtmosphereSpec(BaseModel):
-    time_of_day: Literal["morning", "noon", "golden_hour", "dusk", "night"] = "golden_hour"
-    sky_zenith: str = "#2b588f"
-    sky_horizon: str = "#f2b880"
-    sun_color: str = "#fff0d6"
-    sun_intensity: float = Field(default=2.8, ge=0.2, le=5.5)
-    sun_elevation_deg: float = Field(default=34.0, ge=5.0, le=82.0)
+    time_of_day: Literal["morning", "noon", "golden_hour", "dusk", "night"] = "noon"
+    sky_zenith: str = "#78a6ce"
+    sky_horizon: str = "#d8e4eb"
+    sun_color: str = "#ffffff"
+    sun_intensity: float = Field(default=2.8, ge=0.0, le=5.5)
+    sun_elevation_deg: float = Field(default=60.0, ge=5.0, le=82.0)
     sun_azimuth_deg: float = Field(default=42.0, ge=0.0, le=360.0)
-    fog_color: str = "#d8c4ae"
-    fog_density: float = Field(default=0.0085, ge=0.0, le=0.045)
-    ambient_intensity: float = Field(default=0.75, ge=0.15, le=2.0)
-    cloud_count: int = Field(default=9, ge=0, le=20)
-    wind_strength: float = Field(default=0.55, ge=0.0, le=2.0)
+    fog_color: str = "#d8e4eb"
+    fog_density: float = Field(default=0.0, ge=0.0, le=0.045)
+    ambient_intensity: float = Field(default=0.75, ge=0.0, le=2.0)
+    cloud_count: int = Field(default=0, ge=0, le=20)
+    wind_strength: float = Field(default=0.0, ge=0.0, le=2.0)
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +80,7 @@ class AtmosphereSpec(BaseModel):
 
 class ParametricSpec(BaseModel):
     kind: Literal[
+        "primitive",
         "building",
         "tower",
         "fountain",
@@ -100,6 +101,7 @@ class ParametricSpec(BaseModel):
         "reflecting_pool",
         "platform",
     ]
+    shape: Literal["box", "sphere", "cylinder", "cone"] = Field(default="box", description="For kind='primitive', the base geometry scaled to width, height and depth")
     width: float = Field(default=4.5, ge=0.4, le=48.0)
     height: float = Field(default=5.2, ge=0.4, le=24.0)
     depth: float = Field(default=4.2, ge=0.4, le=48.0)
@@ -130,7 +132,7 @@ class SDFPrimitive(BaseModel):
 
 class ImplicitSDFSpec(BaseModel):
     description: str
-    primitives: list[SDFPrimitive] = Field(..., min_length=2, max_length=16)
+    primitives: list[SDFPrimitive] = Field(..., min_length=1, max_length=16)
     resolution: int = Field(default=52, ge=36, le=64)
     target_height: float = Field(default=2.4, ge=0.4, le=12.0, description="Final world height in meters after normalizing mesh bottom to y=0")
     pedestal: bool = Field(default=False, description="Mount sculpture on a carved stone plinth")
@@ -151,7 +153,7 @@ class ImplicitSDFSpec(BaseModel):
 
 class ArticulatedAgentSpec(BaseModel):
     rig_kind: Literal["bird_flock", "fox", "scooter_rider", "car_driver", "boat_cruiser", "floating_lanterns"] = "bird_flock"
-    count: int = Field(default=5, ge=1, le=14, description="Number of instances in flock/group (1 for single vehicle/creature)")
+    count: int = Field(default=1, ge=1, le=14, description="Number of instances in this group")
     entity_scale: float = Field(default=1.0, ge=0.3, le=3.0)
 
 
@@ -172,9 +174,9 @@ class BehaviorSpec(BaseModel):
 # ---------------------------------------------------------------------------
 
 class WorldObject(BaseModel):
-    id: str = Field(..., description="Unique snake_case persistent ID, e.g. 'bell_tower', 'central_fountain', 'village_birds'")
+    id: str = Field(..., description="Unique snake_case persistent ID describing this object")
     name: str
-    collection: Literal["architecture", "landmarks", "nature", "vehicles", "agents", "props", "lighting"] = "architecture"
+    collection: Literal["architecture", "landmarks", "nature", "vehicles", "agents", "props", "lighting"] = "props"
     carrier: Literal["parametric_assembly", "implicit_sdf", "articulated_agent"]
     position: list[float] = Field(default=[0.0, 0.0, 0.0], min_length=3, max_length=3, description="World [x, y_offset, z] in meters; grounded to h(x,z)+y_offset")
     rotation_y_deg: float = Field(default=0.0, ge=-360.0, le=360.0)
@@ -316,7 +318,7 @@ class WorldState(BaseModel):
 # ---------------------------------------------------------------------------
 
 class TextureRequest(BaseModel):
-    id: str = Field(..., description="Short snake_case texture id, e.g. 'sandstone_wall', 'cobblestone_ground'")
+    id: str = Field(..., description="Short snake_case texture ID describing the material")
     prompt: str = Field(..., description="Seamless tileable top-down PBR material texture prompt for Nano Banana")
     reference_image_index: int | None = Field(default=None, description="If this material should be extracted from a user reference image (material swatch / mood board surface), its 0-based index; otherwise null")
 
@@ -326,8 +328,8 @@ class CarbonWorldDraft(BaseModel):
     summary: str
     terrain: TerrainSpec
     atmosphere: AtmosphereSpec
-    texture_requests: list[TextureRequest] = Field(default_factory=list, max_length=3, description="2-3 key seamless tileable PBR materials for Nano Banana")
-    objects: list[WorldObject] = Field(..., min_length=5, max_length=26)
+    texture_requests: list[TextureRequest] = Field(default_factory=list, max_length=3, description="Optional seamless PBR textures for surfaces that need them")
+    objects: list[WorldObject] = Field(..., description="Objects needed to represent the requested scene; may be empty")
     camera_spawn: list[float] = Field(default=[0.0, 3.5, 22.0], min_length=3, max_length=3)
     camera_look_at: list[float] = Field(default=[0.0, 2.5, 0.0], min_length=3, max_length=3)
     style_guide: str = Field(default="", description="Concise art direction (palette hexes, materials, architecture rules, mood). Required when reference images are given")
