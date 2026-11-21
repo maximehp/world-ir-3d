@@ -26,13 +26,19 @@ load_dotenv()
 
 CARBON_MODEL = "gemini-4-carbon"
 HYDROGEN_MODEL = "gemini-4-hydrogen"
+FLASH_LITE_MODEL = "gemini-3.5-flash-lite"
+
+_CLIENT: genai.Client | None = None
 
 
 def _get_client() -> genai.Client:
-    key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-    if not key:
-        raise RuntimeError("GEMINI_API_KEY is not set")
-    return genai.Client(api_key=key)
+    global _CLIENT
+    if _CLIENT is None:
+        key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        if not key:
+            raise RuntimeError("GEMINI_API_KEY is not set")
+        _CLIENT = genai.Client(api_key=key)
+    return _CLIENT
 
 
 def _pil_to_part(img: Image.Image, quality: int = 88) -> types.Part:
@@ -94,33 +100,18 @@ def _call_json_model(model: str, system: str, contents, schema_cls, max_retries:
 # ---------------------------------------------------------------------------
 
 def carbon_compile_world(user_prompt: str) -> tuple[CarbonWorldDraft, float]:
-    """Compile an unseen natural-language prompt into a structured multi-carrier 3D WorldIR."""
+    """Compile an unseen natural-language prompt into a structured general-purpose multi-carrier 3D WorldIR."""
     system = (
-        "You are Gemini 4 Carbon, a 3D World Compiler producing Blender-style persistent 3D scenes.\n"
-        "Coordinate system: right-handed meters, +Y up, plaza/center at (0, 0, 0), ground height is auto-computed so set position[1] = 0.0 for all grounded objects.\n\n"
-        "YOU HAVE FOUR DISTINCT 3D GEOMETRY CARRIERS — USE THEM TOGETHER RICHLY:\n"
-        "1. `terrain`: analytic heightfield with automatic flat central plaza (plaza_radius 13..20m) and rolling outer hills (plus optional water plane for harbor/river/lake).\n"
-        "2. `parametric_assembly`: detailed multi-part 3D assemblies (NOT crude boxes!) — available kinds:\n"
-        "   - 'building' (recessed glowing windows, shutters, pitched tiled roof, door, steps, optional balcony/chimney)\n"
-        "   - 'tower' (tall stone clock/bell tower with spire/dome roof)\n"
-        "   - 'fountain' (stepped octagonal stone basin, central tier, reflective animated water & live 3D water jets)\n"
-        "   - 'tree' (branching 3D trunk + layered swaying canopy: oak, pine, cypress, blossom, palm)\n"
-        "   - 'archway' (true walkable 3D vaulted stone arch), 'bridge', 'lamp_post' (casts real warm point light!), 'market_stall', 'bench', 'gazebo', 'windmill' (spinning sails!), 'lighthouse' (sweeping beam!), 'scooter', 'car', 'boat'.\n"
-        "3. `implicit_sdf` (ALWAYS INCLUDE AT LEAST ONE!): smooth-min Signed Distance Field compiled via Marching Cubes into a smooth organic 3D mesh! "
-        "Use this for any sculptural centerpiece, monument, carved statue, organic rock arch, crystal spire, animal sculpture, or bespoke unseen object! "
-        "Compose 5..12 primitives in normalized [-1, 1]^3 space using 'smooth_union' (k=0.14..0.28) and 'smooth_subtract', using mirror_x=True for symmetric limbs/ears/arches! Set pedestal=True if it's a statue.\n"
-        "4. `articulated_agent` (ALWAYS INCLUDE AT LEAST ONE AUTONOMOUS MOVING AGENT!): rig_kind in ['bird_flock', 'fox', 'scooter_rider', 'boat_cruiser', 'floating_lanterns'].\n"
-        "   - Give birds `behavior.kind='orbit_and_perch'` referencing a real building/tower/fountain `target_id` so they circle around it, disappear behind it, and land on its roof/rim!\n"
-        "   - Give vehicles/creatures `behavior.kind='patrol_ring'` around the plaza!\n\n"
-        "TEXTURE GENERATION (`texture_requests`, 2 to 3 seamless tileable PBR materials):\n"
-        "- Generate 2-3 cohesive seamless material textures via Nano Banana (e.g. 'plaza_cobble' for terrain.texture_id, 'stone_wall' for buildings/tower/fountain, 'marble_sculpt' for SDF/accents).\n"
-        "- Reference their exact `id` inside `terrain.texture_id` and `object.material.texture_id`!\n\n"
-        "SPATIAL LAYOUT DISCIPLINE (CRITICAL FOR ZERO COLLISIONS):\n"
-        "- Place a focal landmark (e.g. fountain, archway, or SDF sculpture) near (0, 0, 0) or (0, 0, -2).\n"
-        "- Arrange 3-6 buildings/towers/stalls in a welcoming horseshoe/ring at radius 10m..18m around the plaza, with >= 8m center-to-center spacing so NO buildings ever overlap! Rotate them (`rotation_y_deg`) to face toward the plaza center!\n"
-        "- Place 4-7 trees around the perimeter (radius 13m..24m), 2-4 lampposts along walkways (radius 7m..12m), plus benches/vehicles cleanly clear of buildings.\n"
-        "- Aim for 14..22 total persistent objects — rich, recognizable, navigable from all 360 degrees!\n"
-        "- Place `camera_spawn` around `[0, 4.5, 22]` looking toward `[0, 2.5, -1]` with an unobstructed view into the scene."
+        "You are Gemini 4 Carbon, a General-Purpose 3D World Compiler producing persistent 3D scenes matching the user's ACTUAL intent.\n"
+        "DO NOT force a circular plaza, village cottages, lampposts, or statues unless the prompt asks for them!\n"
+        "Coordinate system: right-handed meters, +Y up.\n\n"
+        "YOU HAVE FIVE COMPOSABLE 3D CARRIERS — PICK ONLY WHAT FITS THE USER'S PROMPT:\n"
+        "1. `terrain`: set `ground_kind` ('outdoor_hills'|'flat_floor'|'forest_floor'|'interior_deck'|'none') and `enclosure` ('open_sky'|'space_bridge'|'sci_fi_corridor'|'interior_room'|'cathedral_hall'|'forest_canopy') with `enclosure_size`, `space_stars`, `plaza_radius` (0 for forests/interiors).\n"
+        "2. `procedural_assembly` (PRIMARY GENERAL-PURPOSE GRAMMAR): compose ANY 3D object (spaceship consoles, holographic displays, ceremony arches, pew rows, banquet tables, gnarled ancient trees, fallen logs, ferns, chandeliers, cryo pods) from 4..24 typed parts (`box|cylinder|cone|sphere|capsule|torus|arch_segment|plane|ring|icosahedron|dodecahedron`) with `mirror_x`, `repeat_count`, `repeat_offset`, `repeat_rot_y_deg`, translucent `opacity`, `emissive`, optional attached `PointLight`, and deterministic `anim`.\n"
+        "3. `implicit_sdf` (optional): smooth-min Signed Distance Field compiled via Marching Cubes for organic sculptures/statues/monoliths.\n"
+        "4. `articulated_agent` (optional): `human_character` (bride, groom, officiant, guests, crew — with `walk_path` and `stand_and_face` coordinated performances!) plus wildlife/vehicles (`bird_flock`, `fox`, `scooter_rider`, `boat_cruiser`, `floating_lanterns`) ONLY when authentic to the prompt.\n"
+        "5. `parametric_assembly` (optional reusable components): building, tower, fountain, tree, archway, bridge, lamp_post, market_stall, bench, gazebo, windmill, lighthouse, scooter, car, boat — ONLY use if they genuinely match the prompt!\n\n"
+        "TEXTURE GENERATION (`texture_requests`, 2 to 3 prompt-authentic seamless tileable PBR materials) + unobstructed `camera_spawn` / `camera_look_at` (strictly inside `enclosure_size` for enclosed interiors!)."
     )
     return _call_json_model(
         CARBON_MODEL,
@@ -220,16 +211,21 @@ def hydrogen_audit_multiview(
         "  BOTTOM-LEFT: Opposite 180-Degree Back View (proves full 3D back-side geometry!)\n"
         "  BOTTOM-RIGHT: Hero Close-Up\n\n"
         "AUDIT CRITICALLY AND HONESTLY:\n"
-        "1. Does the world exhibit genuine 3D structure visible coherently from both front and opposite 180° back views?\n"
-        "2. Check for real spatial defects: colliding/overlapping buildings, floating objects, unreadable/tiny silhouettes, broken proportions, or poorly lit/muddy contrast.\n"
-        "3. Check whether the latest user intent/edit is visibly reflected in the 3D scene.\n"
+        "1. PROMPT COVERAGE & ENVIRONMENT AUTHENTICITY (MOST IMPORTANT!): Compare the 3D render against `world_prompt` and `latest_intent`. "
+        "Does the scene ACTUALLY depict the requested environment, layout, and semantic objects (e.g. spaceship interior looks like a spaceship interior with consoles/viewport/bulkheads; dense forest looks like a dense forest with no village plaza; wedding ceremony has floral arch, aisle, bride, groom, guests) rather than a generic village template? "
+        "Populate `prompt_coverage_score` (0..10), `matched_elements`, and `missing_elements` honestly!\n"
+        "2. Does the world exhibit genuine 3D structure visible coherently from both front and opposite 180° back views?\n"
+        "3. Check for real spatial defects: colliding/overlapping structures, floating objects, unreadable silhouettes, or broken lighting/contrast.\n"
         "4. If allow_repair=True and you see a concrete spatial overlap, collision, or scale/placement flaw on 1-3 specific object IDs, "
         "set status='REPAIR_SPATIAL' and return exact bounded `fixes` (`object_id`, `new_position`, `scale_multiplier`, `reason`).\n"
-        "5. Otherwise return status='PASS' (if layout, 3D geometry, and lighting look genuinely solid) or 'WARNING' (with honest notes).\n"
+        "5. Otherwise return status='PASS' (if prompt coverage, layout, 3D geometry, and lighting look genuinely solid) or 'WARNING' (with honest notes).\n"
         "Never inflate scores or claim photorealism where none exists."
     )
     brief = {
         "title": world.title,
+        "world_prompt": world.prompt,
+        "enclosure": world.terrain.enclosure,
+        "ground_kind": world.terrain.ground_kind,
         "latest_intent": latest_intent,
         "allow_repair": allow_repair,
         "objects": [
@@ -239,7 +235,9 @@ def hydrogen_audit_multiview(
                 "carrier": o.carrier,
                 "kind": (
                     o.parametric.kind if o.parametric
-                    else (o.agent.rig_kind if o.agent else (o.implicit_sdf.description if o.implicit_sdf else "unknown"))
+                    else (o.procedural.description if o.procedural
+                    else (f"{o.agent.rig_kind}({o.agent.role})" if o.agent
+                    else (o.implicit_sdf.description if o.implicit_sdf else "unknown")))
                 ),
                 "position": o.position,
                 "scale": o.scale,

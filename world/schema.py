@@ -38,7 +38,9 @@ class PBRTextureAsset(BaseModel):
     normal_url: str
     roughness_url: str
     ao_url: str | None = None
-    source: Literal["nano_banana_pbr", "procedural"] = "nano_banana_pbr"
+    source: Literal["nano_banana_pbr", "flash_lite_provisional", "procedural"] = "nano_banana_pbr"
+    tier: Literal["provisional", "refined"] = "refined"
+    version: int = 1
 
 
 # ---------------------------------------------------------------------------
@@ -46,11 +48,17 @@ class PBRTextureAsset(BaseModel):
 # ---------------------------------------------------------------------------
 
 class TerrainSpec(BaseModel):
-    size: float = Field(default=72.0, ge=36.0, le=140.0)
-    style: Literal["cobblestone_plaza", "meadow_hills", "coastal_harbor", "snowy_valley", "desert_oasis", "forest_clearing"] = "cobblestone_plaza"
+    size: float = Field(default=72.0, ge=24.0, le=140.0)
+    style: Literal["cobblestone_plaza", "meadow_hills", "coastal_harbor", "snowy_valley", "desert_oasis", "forest_clearing", "interior_deck", "stone_hall"] = "cobblestone_plaza"
+    ground_kind: Literal["outdoor_hills", "flat_floor", "forest_floor", "water_surface", "interior_deck", "none"] = "outdoor_hills"
+    enclosure: Literal["open_sky", "interior_room", "sci_fi_corridor", "space_bridge", "forest_canopy", "cathedral_hall"] = "open_sky"
+    enclosure_size: list[float] = Field(default=[24.0, 8.5, 28.0], min_length=3, max_length=3, description="[width, height, depth] in meters for enclosed interiors")
+    enclosure_color: str = "#222936"
+    enclosure_accent: str = "#38bdf8"
+    space_stars: bool = False
     ground_color: str = "#8a8275"
     hill_color: str = "#4f6d3f"
-    plaza_radius: float = Field(default=15.0, ge=4.0, le=32.0, description="Flat central village/courtyard radius in meters")
+    plaza_radius: float = Field(default=15.0, ge=0.0, le=32.0, description="Flat central radius in meters (0.0 for continuous forest/interior)")
     hill_height: float = Field(default=3.2, ge=0.0, le=12.0)
     has_water: bool = False
     water_level: float = Field(default=-0.4, ge=-3.0, le=2.0)
@@ -145,20 +153,93 @@ class ImplicitSDFSpec(BaseModel):
 # ---------------------------------------------------------------------------
 
 class ArticulatedAgentSpec(BaseModel):
-    rig_kind: Literal["bird_flock", "fox", "scooter_rider", "boat_cruiser", "floating_lanterns"] = "bird_flock"
-    count: int = Field(default=5, ge=1, le=14, description="Number of instances in flock/group (1 for single vehicle/creature)")
+    rig_kind: Literal["bird_flock", "fox", "scooter_rider", "boat_cruiser", "floating_lanterns", "human_character"] = "bird_flock"
+    count: int = Field(default=5, ge=1, le=14, description="Number of instances in flock/group (1 for single vehicle/creature/human)")
     entity_scale: float = Field(default=1.0, ge=0.3, le=3.0)
+    # Optional human character attributes (for wedding / cinematic performances)
+    role: Literal["bride", "groom", "officiant", "guest", "villager"] | None = None
+    garment_style: Literal["gown_aline", "gown_sheath", "tuxedo", "suit", "dress_cocktail", "robe", "casual"] | None = None
+    hair_color: str | None = None
+    skin_tone: str | None = None
+    has_veil: bool = False
+    has_bouquet: bool = False
+    appearance_prompt: str | None = None
 
 
 class BehaviorSpec(BaseModel):
-    kind: Literal["none", "orbit_target", "orbit_and_perch", "patrol_ring", "patrol_waypoints", "sway_wind", "rotate_continuous", "bob_water"] = "none"
-    target_id: str | None = Field(default=None, description="ID of another persistent 3D world object to orbit, perch on, or circle")
+    kind: Literal[
+        "none",
+        "orbit_target",
+        "orbit_and_perch",
+        "patrol_ring",
+        "patrol_waypoints",
+        "walk_path",
+        "stand_and_face",
+        "sway_wind",
+        "rotate_continuous",
+        "bob_water",
+    ] = "none"
+    target_id: str | None = Field(default=None, description="ID of another persistent 3D world object to orbit, perch on, face, or walk toward")
     orbit_radius: float = Field(default=6.0, ge=1.2, le=28.0)
     orbit_height: float = Field(default=5.5, ge=0.5, le=20.0)
     speed: float = Field(default=0.65, ge=0.05, le=4.0)
     perch_duration_sec: float = Field(default=3.5, ge=1.0, le=12.0)
     fly_duration_sec: float = Field(default=7.5, ge=2.0, le=20.0)
-    waypoints_xz: list[list[float]] = Field(default_factory=list, description="Optional [[x,z], ...] loop for patrol_waypoints")
+    waypoints_xz: list[list[float]] = Field(default_factory=list, description="Optional [[x,z], ...] path for patrol_waypoints or walk_path")
+    start_time_s: float = Field(default=0.0, ge=0.0, le=120.0)
+    duration_s: float = Field(default=6.0, ge=0.5, le=120.0)
+
+
+# ---------------------------------------------------------------------------
+# Carrier 5: General-Purpose Composable 3D Part-Tree Grammar (`procedural_assembly`)
+# Expresses arbitrary architectural, sci-fi, floral, organic, furniture & mechanical 3D objects
+# without requiring hardcoded domain templates!
+# ---------------------------------------------------------------------------
+
+class AssemblyPart(BaseModel):
+    shape: Literal[
+        "box",
+        "cylinder",
+        "cone",
+        "sphere",
+        "capsule",
+        "torus",
+        "arch_segment",
+        "plane",
+        "ring",
+        "icosahedron",
+        "dodecahedron",
+    ] = "box"
+    pos: list[float] = Field(default=[0.0, 0.0, 0.0], min_length=3, max_length=3)
+    rot_deg: list[float] = Field(default=[0.0, 0.0, 0.0], min_length=3, max_length=3)
+    size: list[float] = Field(
+        default=[1.0, 1.0, 1.0],
+        min_length=3,
+        max_length=3,
+        description="box/plane:[w,h,d], cyl/cone:[rTop,rBot,h], sphere/ico/dodec:[rx,ry,rz], torus:[R,tube,arc_deg], capsule:[r,len,1], arch_segment:[innerR,outerR,depth], ring:[innerR,outerR,1]",
+    )
+    color: str | None = None
+    roughness: float | None = Field(default=None, ge=0.02, le=1.0)
+    metalness: float | None = Field(default=None, ge=0.0, le=1.0)
+    emissive: str | None = None
+    emissive_intensity: float = Field(default=0.0, ge=0.0, le=6.0)
+    opacity: float = Field(default=1.0, ge=0.05, le=1.0)
+    texture_id: str | None = None
+    mirror_x: bool = False
+    repeat_count: int = Field(default=1, ge=1, le=16)
+    repeat_offset: list[float] = Field(default=[0.0, 0.0, 0.0], min_length=3, max_length=3)
+    repeat_rot_y_deg: float = Field(default=0.0, ge=-360.0, le=360.0)
+    anim: Literal["none", "spin_y", "spin_z", "bob_y", "pulse_emissive", "sway"] = "none"
+
+
+class ProceduralAssemblySpec(BaseModel):
+    description: str
+    parts: list[AssemblyPart] = Field(..., min_length=1, max_length=28)
+    light_color: str | None = None
+    light_intensity: float = Field(default=0.0, ge=0.0, le=40.0)
+    light_pos: list[float] = Field(default=[0.0, 2.0, 0.0], min_length=3, max_length=3)
+    light_distance: float = Field(default=14.0, ge=1.0, le=45.0)
+    contact_ao_radius: float = Field(default=1.2, ge=0.0, le=12.0)
 
 
 # ---------------------------------------------------------------------------
@@ -166,15 +247,16 @@ class BehaviorSpec(BaseModel):
 # ---------------------------------------------------------------------------
 
 class WorldObject(BaseModel):
-    id: str = Field(..., description="Unique snake_case persistent ID, e.g. 'bell_tower', 'central_fountain', 'village_birds'")
+    id: str = Field(..., description="Unique snake_case persistent ID")
     name: str
-    collection: Literal["architecture", "landmarks", "nature", "vehicles", "agents", "props", "lighting"] = "architecture"
-    carrier: Literal["parametric_assembly", "implicit_sdf", "articulated_agent"]
+    collection: Literal["architecture", "landmarks", "nature", "vehicles", "agents", "props", "lighting", "structures", "characters"] = "props"
+    carrier: Literal["parametric_assembly", "procedural_assembly", "implicit_sdf", "articulated_agent"]
     position: list[float] = Field(default=[0.0, 0.0, 0.0], min_length=3, max_length=3, description="World [x, y_offset, z] in meters; grounded to h(x,z)+y_offset")
     rotation_y_deg: float = Field(default=0.0, ge=-360.0, le=360.0)
     scale: float = Field(default=1.0, ge=0.2, le=4.0)
     material: MaterialSpec = Field(default_factory=MaterialSpec)
     parametric: ParametricSpec | None = None
+    procedural: ProceduralAssemblySpec | None = None
     implicit_sdf: ImplicitSDFSpec | None = None
     agent: ArticulatedAgentSpec | None = None
     behavior: BehaviorSpec = Field(default_factory=BehaviorSpec)
@@ -187,17 +269,24 @@ class WorldObject(BaseModel):
 # ---------------------------------------------------------------------------
 
 class WorldCosts(BaseModel):
+    flash_lite_calls: int = 0
     carbon_calls: int = 0
     hydrogen_calls: int = 0
     nano_banana_texture_calls: int = 0
+    provisional_texture_calls: int = 0
     sdf_meshes_compiled: int = 0
 
 
 class WorldTimings(BaseModel):
+    flash_lite_ms: float = 0.0
     carbon_ms: float = 0.0
     nano_banana_ms: float = 0.0
     sdf_compile_ms: float = 0.0
     hydrogen_ms: float = 0.0
+    time_to_first_visible_ms: float = 0.0
+    time_to_first_object_ms: float = 0.0
+    time_to_geometry_complete_ms: float = 0.0
+    time_to_refined_ms: float = 0.0
     total_ms: float = 0.0
 
 
@@ -222,6 +311,9 @@ class MultiViewAuditVerdict(BaseModel):
     geometry_3d_score: float = Field(..., ge=0.0, le=10.0)
     spatial_coherence_score: float = Field(..., ge=0.0, le=10.0)
     lighting_material_score: float = Field(..., ge=0.0, le=10.0)
+    prompt_coverage_score: float = Field(default=8.0, ge=0.0, le=10.0)
+    matched_elements: list[str] = Field(default_factory=list)
+    missing_elements: list[str] = Field(default_factory=list)
     summary: str
     defects: list[SpatialDefect] = Field(default_factory=list)
     fixes: list[BoundedSpatialFix] = Field(default_factory=list)
@@ -241,6 +333,74 @@ class WorldRevision(BaseModel):
     audit: MultiViewAuditVerdict | None = None
 
 
+# ---------------------------------------------------------------------------
+# Camera-Independent Cinematic Tracks, Spatial Regions & Streamed WorldOps
+# ---------------------------------------------------------------------------
+
+class CameraKeyframe(BaseModel):
+    t: float = Field(..., ge=0.0, le=120.0)
+    pos: list[float] = Field(..., min_length=3, max_length=3)
+    look_at: list[float] | None = Field(default=None, min_length=3, max_length=3)
+    fov_deg: float = Field(default=48.0, ge=20.0, le=90.0)
+
+
+class CameraTrack(BaseModel):
+    id: str = Field(..., description="Unique camera track ID, e.g. 'hero_dolly', 'aerial_crane'")
+    name: str
+    kind: Literal["spline", "orbit_entity", "static"] = "spline"
+    duration_s: float = Field(default=12.0, ge=2.0, le=60.0)
+    keyframes: list[CameraKeyframe] = Field(default_factory=list)
+    look_at_id: str | None = None
+    orbit_radius: float = Field(default=11.0, ge=2.0, le=55.0)
+    orbit_height: float = Field(default=4.5, ge=0.5, le=32.0)
+
+
+class RegionSpec(BaseModel):
+    region_id: str = Field(..., description="Deterministic spatial chunk ID, e.g. 'r_0_0', 'r_1_0'")
+    rx: int = 0
+    rz: int = 0
+    center_xz: list[float] = Field(default=[0.0, 0.0], min_length=2, max_length=2)
+    radius: float = Field(default=22.0, ge=10.0, le=40.0)
+    biome_summary: str = ""
+    object_ids: list[str] = Field(default_factory=list)
+
+
+class WorldOp(BaseModel):
+    op_id: str
+    world_id: str
+    seq: int = 0
+    phase: Literal[
+        "scaffold",
+        "geometry",
+        "agent",
+        "texture_provisional",
+        "texture_refined",
+        "camera",
+        "edit",
+        "audit",
+        "region",
+        "complete",
+    ] = "geometry"
+    worker: str = "coordinator"
+    domain: Literal["init", "terrain", "atmosphere", "texture", "object", "camera", "region", "status"]
+    action: Literal["upsert", "patch", "delete", "complete"] = "upsert"
+    target_id: str = ""
+    payload: dict = Field(default_factory=dict)
+    elapsed_ms: float = 0.0
+
+
+class AppearanceReference(BaseModel):
+    ref_id: str                     # e.g. "scene" or entity object_id ("bride", "groom")
+    kind: Literal["scene", "entity_turnaround"] = "entity_turnaround"
+    appearance_rev: int = 1
+    appearance_hash: str = ""
+    prompt: str = ""
+    image_url: str
+    guide_url: str | None = None
+    model: str = "gemini-nano-banana-2.1"
+    inference_ms: float = 0.0
+
+
 class WorldState(BaseModel):
     world_id: str
     title: str
@@ -248,8 +408,13 @@ class WorldState(BaseModel):
     terrain: TerrainSpec
     atmosphere: AtmosphereSpec
     textures: dict[str, PBRTextureAsset] = Field(default_factory=dict)
+    appearance_refs: dict[str, AppearanceReference] = Field(default_factory=dict)
     objects: list[WorldObject] = Field(default_factory=list)
+    cameras: list[CameraTrack] = Field(default_factory=list)
+    regions: list[RegionSpec] = Field(default_factory=list)
     revision: int = 1
+    seq: int = 0
+    generation_status: Literal["idle", "streaming", "complete"] = "complete"
     history: list[WorldRevision] = Field(default_factory=list)
     cumulative_costs: WorldCosts = Field(default_factory=WorldCosts)
     camera_spawn: list[float] = Field(default=[0.0, 3.2, 22.0], min_length=3, max_length=3)
@@ -284,6 +449,7 @@ class ObjectMutation(BaseModel):
     new_material: MaterialSpec | None = None
     new_behavior: BehaviorSpec | None = None
     new_parametric: ParametricSpec | None = None
+    new_procedural: ProceduralAssemblySpec | None = None
     new_implicit_sdf: ImplicitSDFSpec | None = None
     visible: bool | None = None
 
@@ -313,6 +479,69 @@ class Hydrogen3DAuditResponse(BaseModel):
     geometry_3d_score: float = Field(..., ge=0.0, le=10.0)
     spatial_coherence_score: float = Field(..., ge=0.0, le=10.0)
     lighting_material_score: float = Field(..., ge=0.0, le=10.0)
+    prompt_coverage_score: float = Field(default=8.0, ge=0.0, le=10.0)
+    matched_elements: list[str] = Field(default_factory=list)
+    missing_elements: list[str] = Field(default_factory=list)
     summary: str
     defects: list[SpatialDefect] = Field(default_factory=list)
     fixes: list[BoundedSpatialFix] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Fast Parallel Scaffold & Streaming Edit Contracts
+# ---------------------------------------------------------------------------
+
+class ScaffoldAnchor(BaseModel):
+    id: str
+    name: str
+    role: Literal["hero_procedural", "hero_sdf", "structure", "environment", "character", "agent"] = "hero_procedural"
+    position: list[float] = Field(default=[0.0, 0.0, 0.0], min_length=3, max_length=3)
+    radius: float = Field(default=2.5, ge=0.4, le=12.0)
+    brief: str = ""
+
+
+class WorldScaffoldManifest(BaseModel):
+    title: str
+    summary: str
+    scene_layout: str = Field(default="open_scene", description="e.g. 'ceremony_aisle', 'spaceship_bridge', 'dense_forest_trail', 'courtyard', 'hall'")
+    terrain: TerrainSpec
+    atmosphere: AtmosphereSpec
+    texture_requests: list[TextureRequest] = Field(default_factory=list, max_length=5)
+    anchors: list[ScaffoldAnchor] = Field(default_factory=list, max_length=12)
+    camera_spawn: list[float] = Field(default=[0.0, 3.2, 16.0], min_length=3, max_length=3)
+    camera_look_at: list[float] = Field(default=[0.0, 1.8, -2.0], min_length=3, max_length=3)
+
+
+class ComplexObjectBrief(BaseModel):
+    id: str
+    name: str
+    collection: Literal["architecture", "landmarks", "nature", "vehicles", "agents", "props", "lighting", "structures", "characters"] = "landmarks"
+    carrier: Literal["implicit_sdf", "procedural_assembly", "parametric_assembly"] = "procedural_assembly"
+    position: list[float] = Field(default=[3.5, 0.0, 3.5], min_length=3, max_length=3)
+    rotation_y_deg: float = 0.0
+    color: str = "#c8b8a2"
+    texture_id: str | None = None
+    brief: str = ""
+
+
+class FastEditPatch(BaseModel):
+    action: Literal[
+        "modify_objects",
+        "update_behavior",
+        "restyle_material",
+        "add_objects",
+        "remove_objects",
+        "update_atmosphere",
+        "update_terrain",
+        "update_camera",
+        "multi_edit",
+    ]
+    summary: str
+    new_texture_requests: list[TextureRequest] = Field(default_factory=list, max_length=3)
+    mutations: list[ObjectMutation] = Field(default_factory=list)
+    add_objects: list[WorldObject] = Field(default_factory=list)
+    complex_object_briefs: list[ComplexObjectBrief] = Field(default_factory=list, max_length=5)
+    remove_object_ids: list[str] = Field(default_factory=list)
+    new_atmosphere: AtmosphereSpec | None = None
+    new_terrain: TerrainSpec | None = None
+    add_cameras: list[CameraTrack] = Field(default_factory=list)

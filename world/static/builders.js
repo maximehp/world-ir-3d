@@ -26,21 +26,33 @@ function smoothstep(e0, e1, x) {
 }
 
 export function sampleTerrainHeight(terrain, x, z) {
+  const gkind = terrain.ground_kind || "outdoor_hills";
+  if (gkind === "interior_deck" || gkind === "flat_floor" || gkind === "none") {
+    return 0.0;
+  }
   const r = Math.hypot(x, z);
-  const pr = terrain.plaza_radius || 15.0;
+  const pr = terrain.plaza_radius ?? 15.0;
   const hh = terrain.hill_height ?? 3.0;
-  const hillMask = smoothstep(pr * 0.85, pr * 1.6, r);
+  // Continuous undulating forest floor when ground_kind === "forest_floor" or plaza_radius <= 0.1
+  const hillMask = (gkind === "forest_floor" || pr <= 0.1)
+    ? 1.0
+    : smoothstep(pr * 0.85, pr * 1.6, r);
 
   const n1 = Math.sin(x * 0.085 + 0.4) * Math.cos(z * 0.085 - 0.3);
   const n2 = Math.sin(x * 0.17 - z * 0.14 + 1.2) * 0.45;
   const n3 = Math.cos((x + z) * 0.055) * 0.55;
-  let h = (n1 * 0.5 + n2 * 0.35 + n3 * 0.35 + 0.45) * hh * hillMask;
+  let h = (n1 * 0.5 + n2 * 0.35 + n3 * 0.35 + (gkind === "forest_floor" ? 0.15 : 0.45)) * hh * hillMask;
 
   if (terrain.has_water && terrain.style === "coastal_harbor") {
-    const seaBlend = smoothstep(pr * 0.55, pr * 1.15, z);
+    const seaBlend = smoothstep(Math.max(4.0, pr) * 0.55, Math.max(4.0, pr) * 1.15, z);
     h = h * (1.0 - seaBlend) + (terrain.water_level - 1.2) * seaBlend;
+  } else if (terrain.has_water && gkind === "forest_floor") {
+    // Winding woodland stream cutting naturally through the forest floor
+    const stream = Math.abs(x - Math.sin(z * 0.14) * 3.8 - 2.5);
+    const carve = 1.0 - smoothstep(1.2, 3.8, stream);
+    h = h * (1.0 - carve * 0.85) + (terrain.water_level - 0.65) * carve;
   } else if (terrain.has_water) {
-    const stream = Math.abs(z - Math.sin(x * 0.12) * 5.0 - pr * 0.85);
+    const stream = Math.abs(z - Math.sin(x * 0.12) * 5.0 - Math.max(4.0, pr) * 0.85);
     const carve = 1.0 - smoothstep(1.8, 5.5, stream);
     h = h * (1.0 - carve * 0.8) + (terrain.water_level - 0.9) * carve;
   }
@@ -199,8 +211,10 @@ export function createPBRMaterial(matSpec, texturesDict, options = {}) {
   const repeat = options.repeat ?? matSpec.texture_repeat ?? 2.0;
   const repeatY = options.repeatY ?? repeat;
   const texId = options.textureIdOverride !== undefined ? options.textureIdOverride : matSpec.texture_id;
+  const normalStrength = options.normalStrength ?? 1.05;
+  const tintWeight = options.tintWeight ?? 0.22;
   const params = {
-    color,
+    color: color.clone(),
     roughness: options.roughness ?? matSpec.roughness ?? 0.76,
     metalness: options.metalness ?? matSpec.metalness ?? 0.05,
     emissive: new THREE.Color(options.emissive ?? matSpec.emissive ?? "#000000"),
@@ -211,15 +225,85 @@ export function createPBRMaterial(matSpec, texturesDict, options = {}) {
   if (texAsset) {
     params.map = loadRepeatTex(texAsset.albedo_url, repeat, repeatY, true);
     params.normalMap = loadRepeatTex(texAsset.normal_url, repeat, repeatY, false);
-    params.normalScale = new THREE.Vector2(options.normalStrength ?? 1.05, options.normalStrength ?? 1.05);
+    params.normalScale = new THREE.Vector2(normalStrength, normalStrength);
     params.roughnessMap = loadRepeatTex(texAsset.roughness_url, repeat, repeatY, false);
     if (texAsset.ao_url) {
       params.aoMap = loadRepeatTex(texAsset.ao_url, repeat, repeatY, false);
       params.aoMapIntensity = 0.75;
     }
-    params.color = new THREE.Color("#ffffff").lerp(color, options.tintWeight ?? 0.22);
+    params.color = new THREE.Color("#ffffff").lerp(color, tintWeight);
   }
-  return new THREE.MeshStandardMaterial(params);
+  const mat = new THREE.MeshStandardMaterial(params);
+  if (!options.noTexture && texId) {
+    mat.userData.pbrBinding = {
+      texId,
+      repeat,
+      repeatY,
+      normalStrength,
+      tintWeight,
+      baseColor: color.clone(),
+    };
+  }
+  return mat;
+}
+
+function loadRepeatTexAsync(url, repeatX, repeatY, isColor) {
+  const key = `${url}|${repeatX}|${repeatY}|${isColor}`;
+  if (loadedTexCache.has(key)) return Promise.resolve(loadedTexCache.get(key));
+  return new Promise((resolve, reject) => {
+    texLoader.load(
+      url,
+      tex => {
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        tex.repeat.set(repeatX, repeatY);
+        tex.anisotropy = 8;
+        if (isColor) tex.colorSpace = THREE.SRGBColorSpace;
+        loadedTexCache.set(key, tex);
+        resolve(tex);
+      },
+      undefined,
+      err => reject(err)
+    );
+  });
+}
+
+export async function upgradeMaterialsWithTexture(worldRoot, texAsset) {
+  // Hot-swap newly arrived provisional/refined PBR maps onto every live Three.js material referencing texAsset.id IN PLACE.
+  const matchingMats = new Set();
+  worldRoot.traverse(n => {
+    if (!n.isMesh || !n.material) return;
+    const mats = Array.isArray(n.material) ? n.material : [n.material];
+    for (const m of mats) {
+      if (m.userData?.pbrBinding?.texId === texAsset.id) matchingMats.add(m);
+    }
+  });
+  if (matchingMats.size === 0) return 0;
+
+  for (const m of matchingMats) {
+    const b = m.userData.pbrBinding;
+    try {
+      const [alb, nrm, rgh, ao] = await Promise.all([
+        loadRepeatTexAsync(texAsset.albedo_url, b.repeat, b.repeatY, true),
+        loadRepeatTexAsync(texAsset.normal_url, b.repeat, b.repeatY, false),
+        loadRepeatTexAsync(texAsset.roughness_url, b.repeat, b.repeatY, false),
+        texAsset.ao_url ? loadRepeatTexAsync(texAsset.ao_url, b.repeat, b.repeatY, false) : Promise.resolve(null),
+      ]);
+      m.map = alb;
+      m.normalMap = nrm;
+      m.normalScale = new THREE.Vector2(b.normalStrength, b.normalStrength);
+      m.roughnessMap = rgh;
+      if (ao) {
+        m.aoMap = ao;
+        m.aoMapIntensity = 0.75;
+      }
+      m.color.copy(new THREE.Color("#ffffff").lerp(b.baseColor, b.tintWeight));
+      m.needsUpdate = true;
+    } catch (e) {
+      console.warn("In-place PBR upgrade failed for", texAsset.id, e);
+    }
+  }
+  return matchingMats.size;
 }
 
 function ensureUV2ForAO(mesh) {
@@ -240,126 +324,389 @@ function enableShadows(root) {
   return root;
 }
 
+function buildSpaceBackdrop() {
+  const g = new THREE.Group();
+  // Crisp procedural 3D Starfield sphere outside the ship viewport
+  const count = 1400;
+  const pos = new Float32Array(count * 3);
+  const cols = new Float32Array(count * 3);
+  const rng = seededRand(777);
+  const cTmp = new THREE.Color();
+  for (let i = 0; i < count; i++) {
+    const u = rng(), v = rng();
+    const theta = u * Math.PI * 2;
+    const phi = Math.acos(2 * v - 1);
+    const r = 95 + rng() * 60;
+    pos[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+    pos[i * 3 + 1] = r * Math.cos(phi);
+    pos[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
+    const tint = rng();
+    cTmp.set(tint < 0.25 ? "#9fd4ff" : tint < 0.45 ? "#ffdcb2" : "#ffffff");
+    cols[i * 3] = cTmp.r; cols[i * 3 + 1] = cTmp.g; cols[i * 3 + 2] = cTmp.b;
+  }
+  const sGeo = new THREE.BufferGeometry();
+  sGeo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  sGeo.setAttribute("color", new THREE.BufferAttribute(cols, 3));
+  const stars = new THREE.Points(sGeo, new THREE.PointsMaterial({ size: 0.72, vertexColors: true, transparent: true, opacity: 0.95 }));
+  g.add(stars);
+
+  // Distant ringed alien gas giant & glowing nebula visible straight through the forward bridge viewport (-Z)
+  const planet = new THREE.Mesh(
+    new THREE.SphereGeometry(11.5, 28, 22),
+    new THREE.MeshStandardMaterial({ color: "#4d78b8", emissive: "#1c3663", emissiveIntensity: 0.55, roughness: 0.72 })
+  );
+  planet.position.set(-14, 10, -78);
+  g.add(planet);
+
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(15.0, 22.5, 48),
+    new THREE.MeshBasicMaterial({ color: "#88c6f2", side: THREE.DoubleSide, transparent: true, opacity: 0.42 })
+  );
+  ring.position.copy(planet.position);
+  ring.rotation.set(1.22, 0.25, -0.35);
+  g.add(ring);
+
+  const nebGlow = new THREE.Mesh(
+    new THREE.SphereGeometry(26, 18, 14),
+    new THREE.MeshBasicMaterial({ color: "#6d3bb5", transparent: true, opacity: 0.14, side: THREE.BackSide, depthWrite: false })
+  );
+  nebGlow.position.set(22, 6, -86);
+  g.add(nebGlow);
+
+  return g;
+}
+
+function buildArchitecturalEnclosure(terrain, texturesDict) {
+  const enc = terrain.enclosure || "open_sky";
+  if (enc === "open_sky") return null;
+  const g = new THREE.Group();
+  const [W, H, D] = terrain.enclosure_size || [24, 8.5, 28];
+  const baseCol = terrain.enclosure_color || "#1e2633";
+  const accentCol = terrain.enclosure_accent || "#38e8ff";
+
+  const isSciFi = enc === "space_bridge" || enc === "sci_fi_corridor";
+  const wallMat = createPBRMaterial(
+    { color: baseCol, roughness: isSciFi ? 0.36 : 0.82, metalness: isSciFi ? 0.78 : 0.05, texture_id: terrain.texture_id },
+    texturesDict,
+    { repeat: 3.0, tintWeight: isSciFi ? 0.55 : 0.35 }
+  );
+  const trimMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(baseCol).offsetHSL(0, 0, isSciFi ? 0.08 : -0.06),
+    roughness: isSciFi ? 0.28 : 0.75,
+    metalness: isSciFi ? 0.85 : 0.15,
+  });
+  const glowMat = new THREE.MeshStandardMaterial({
+    color: accentCol,
+    emissive: new THREE.Color(accentCol),
+    emissiveIntensity: 2.6,
+    roughness: 0.2,
+  });
+
+  if (isSciFi) {
+    // Side angled bulkheads (left & right)
+    for (const sx of [-1, 1]) {
+      const lowerWall = new THREE.Mesh(new THREE.BoxGeometry(0.65, H * 0.56, D), wallMat);
+      lowerWall.position.set(sx * (W * 0.5), H * 0.28, 0);
+      lowerWall.receiveShadow = true;
+      g.add(lowerWall);
+
+      const upperCant = new THREE.Mesh(new THREE.BoxGeometry(0.65, H * 0.55, D), wallMat);
+      upperCant.position.set(sx * (W * 0.44), H * 0.76, 0);
+      upperCant.rotation.z = sx * 0.32;
+      g.add(upperCant);
+
+      // Recessed luminous sci-fi trim strip along lower deck & mid-wall
+      const stripLow = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.10, D - 1.5), glowMat);
+      stripLow.position.set(sx * (W * 0.5 - 0.36), 0.18, 0);
+      g.add(stripLow);
+
+      const stripMid = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.14, D - 2.0), glowMat);
+      stripMid.position.set(sx * (W * 0.5 - 0.36), H * 0.48, 0);
+      g.add(stripMid);
+    }
+
+    // Ceiling deck + ribbed structural hull arch frames
+    const ceiling = new THREE.Mesh(new THREE.BoxGeometry(W * 0.92, 0.55, D), wallMat);
+    ceiling.position.set(0, H, 0);
+    g.add(ceiling);
+
+    const nRibs = 6;
+    for (let i = 0; i < nRibs; i++) {
+      const rz = -D * 0.44 + (i / (nRibs - 1)) * (D * 0.88);
+      const topBeam = new THREE.Mesh(new THREE.BoxGeometry(W * 0.88, 0.42, 0.52), trimMat);
+      topBeam.position.set(0, H - 0.32, rz);
+      g.add(topBeam);
+      for (const sx of [-1, 1]) {
+        const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.55, H, 0.56), trimMat);
+        pillar.position.set(sx * (W * 0.48), H * 0.5, rz);
+        g.add(pillar);
+      }
+      // Overhead light bar on every other rib
+      if (i % 2 === 0) {
+        const lBar = new THREE.Mesh(new THREE.BoxGeometry(W * 0.42, 0.12, 0.22), glowMat);
+        lBar.position.set(0, H - 0.56, rz);
+        g.add(lBar);
+        const pl = new THREE.PointLight(accentCol, 14.0, 22.0, 1.5);
+        pl.position.set(0, H - 1.1, rz);
+        g.add(pl);
+      }
+    }
+
+    // Rear bulkhead wall (+Z) with framed blast doorway
+    const backWall = new THREE.Mesh(new THREE.BoxGeometry(W, H, 0.65), wallMat);
+    backWall.position.set(0, H * 0.5, D * 0.5);
+    g.add(backWall);
+    const doorFrame = new THREE.Mesh(new THREE.BoxGeometry(3.4, 3.8, 0.85), trimMat);
+    doorFrame.position.set(0, 1.9, D * 0.5 - 0.1);
+    g.add(doorFrame);
+    const doorGlow = new THREE.Mesh(new THREE.BoxGeometry(3.5, 0.12, 0.92), glowMat);
+    doorGlow.position.set(0, 3.82, D * 0.5 - 0.1);
+    g.add(doorGlow);
+
+    // Forward Panoramic Bridge Viewport (-Z): low sill + upper header + angled mullions + translucent glass!
+    const sill = new THREE.Mesh(new THREE.BoxGeometry(W, H * 0.22, 0.75), wallMat);
+    sill.position.set(0, H * 0.11, -D * 0.5);
+    g.add(sill);
+    const header = new THREE.Mesh(new THREE.BoxGeometry(W, H * 0.18, 0.75), wallMat);
+    header.position.set(0, H * 0.91, -D * 0.5);
+    g.add(header);
+    for (const mx of [-W * 0.34, -W * 0.14, W * 0.14, W * 0.34]) {
+      const mullion = new THREE.Mesh(new THREE.BoxGeometry(0.28, H * 0.68, 0.45), trimMat);
+      mullion.position.set(mx, H * 0.52, -D * 0.5);
+      g.add(mullion);
+    }
+    const glassMat = new THREE.MeshPhysicalMaterial({
+      color: "#88c8ff",
+      roughness: 0.06,
+      metalness: 0.1,
+      transparent: true,
+      opacity: 0.14,
+      clearcoat: 1.0,
+      depthWrite: false,
+    });
+    const viewportGlass = new THREE.Mesh(new THREE.PlaneGeometry(W * 0.94, H * 0.64), glassMat);
+    viewportGlass.position.set(0, H * 0.52, -D * 0.5 + 0.12);
+    g.add(viewportGlass);
+
+    // Add real 3D deep-space stars & ringed planet outside the viewport!
+    g.add(buildSpaceBackdrop());
+    // Soft warm bridge deck key light
+    const deckKey = new THREE.PointLight("#dcefff", 18.0, 28.0, 1.4);
+    deckKey.position.set(0, H - 1.5, 0);
+    g.add(deckKey);
+    return g;
+  }
+
+  if (enc === "interior_room" || enc === "cathedral_hall") {
+    // Full enclosed architectural room / hall with warm clerestory glow
+    for (const sx of [-1, 1]) {
+      const wMesh = new THREE.Mesh(new THREE.BoxGeometry(0.6, H, D), wallMat);
+      wMesh.position.set(sx * W * 0.5, H * 0.5, 0);
+      wMesh.receiveShadow = true;
+      g.add(wMesh);
+    }
+    for (const sz of [-1, 1]) {
+      const wMesh = new THREE.Mesh(new THREE.BoxGeometry(W, H, 0.6), wallMat);
+      wMesh.position.set(0, H * 0.5, sz * D * 0.5);
+      wMesh.receiveShadow = true;
+      g.add(wMesh);
+    }
+    const ceil = new THREE.Mesh(new THREE.BoxGeometry(W, 0.5, D), trimMat);
+    ceil.position.set(0, H, 0);
+    g.add(ceil);
+    for (let i = 0; i < 4; i++) {
+      const rz = -D * 0.35 + (i / 3) * D * 0.7;
+      const beam = new THREE.Mesh(new THREE.BoxGeometry(W - 0.5, 0.35, 0.38), trimMat);
+      beam.position.set(0, H - 0.35, rz);
+      g.add(beam);
+      const pl = new THREE.PointLight("#ffe6c2", 18.0, 24.0, 1.4);
+      pl.position.set(0, H - 1.2, rz);
+      g.add(pl);
+    }
+    return g;
+  }
+
+  if (enc === "forest_canopy") {
+    // Dense surrounding primeval forest perimeter trunks + dappled light shafts!
+    const rng = seededRand(314);
+    const trunkMat = new THREE.MeshStandardMaterial({ color: "#3d2c1e", roughness: 0.95, normalMap: getWoodNormalMap() });
+    const leafMat = new THREE.MeshStandardMaterial({ color: "#203d22", roughness: 0.92, normalMap: getFoliageNormalMap() });
+    const nPerim = 24;
+    for (let i = 0; i < nPerim; i++) {
+      const a = (i / nPerim) * Math.PI * 2 + (rng() - 0.5) * 0.14;
+      const r = 21.0 + rng() * 9.0;
+      const tx = Math.cos(a) * r;
+      const tz = Math.sin(a) * r;
+      const gy = sampleTerrainHeight(terrain, tx, tz);
+      const th = 12.0 + rng() * 7.0;
+      const tr = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.62, th, 8), trunkMat);
+      tr.position.set(tx, gy + th * 0.5, tz);
+      g.add(tr);
+      const crown = new THREE.Mesh(new THREE.DodecahedronGeometry(3.4 + rng() * 2.0, 1), leafMat);
+      crown.scale.set(1.25, 0.8, 1.25);
+      crown.position.set(tx, gy + th * 0.92, tz);
+      g.add(crown);
+    }
+    // Soft translucent diagonal forest sunbeams
+    const beamMat = new THREE.MeshBasicMaterial({
+      color: "#fff4cf",
+      transparent: true,
+      opacity: 0.055,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    for (let i = 0; i < 4; i++) {
+      const shaft = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 2.8, 18.0, 12, 1, true), beamMat);
+      shaft.position.set(-6 + i * 4.5, 8.5, -5 + (i % 2) * 7.0);
+      shaft.rotation.z = 0.28;
+      shaft.rotation.x = 0.12;
+      g.add(shaft);
+    }
+    return g;
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
-// Carrier 1: Dual-Biome Splat Heightfield Terrain + Animated Normal-Mapped Water
+// Carrier 1: General Environment Floor / Heightfield Terrain + Enclosures + Water
 // ---------------------------------------------------------------------------
 export function buildTerrain(terrain, texturesDict) {
   const group = new THREE.Group();
   group.name = "terrain_group";
 
-  const size = terrain.size || 72;
-  const segs = 120;
-  const geo = new THREE.PlaneGeometry(size, size, segs, segs);
-  geo.rotateX(-Math.PI / 2);
+  const gkind = terrain.ground_kind || "outdoor_hills";
+  const enc = terrain.enclosure || "open_sky";
+  const isInterior = enc === "space_bridge" || enc === "sci_fi_corridor" || enc === "interior_room" || enc === "cathedral_hall";
 
-  const pos = geo.attributes.position;
-  const colors = new Float32Array(pos.count * 3);
-  const splatWeight = new Float32Array(pos.count);
-  const cPlaza = new THREE.Color(terrain.ground_color || "#8a8275");
-  const cHill = new THREE.Color(terrain.hill_color || "#4f6d3f");
-  const cTmp = new THREE.Color();
-  const pr = terrain.plaza_radius || 15.0;
+  const encGroup = buildArchitecturalEnclosure(terrain, texturesDict);
+  if (encGroup) group.add(encGroup);
 
-  const hasDualTex = Boolean(terrain.texture_id && texturesDict[terrain.texture_id] && terrain.hill_texture_id && texturesDict[terrain.hill_texture_id]);
-
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i);
-    const z = pos.getZ(i);
-    const y = sampleTerrainHeight(terrain, x, z);
-    pos.setY(i, y);
-
-    const r = Math.hypot(x, z);
-    // Natural organic wobble along plaza perimeter so hill transition looks organic
-    const wobble = Math.sin(Math.atan2(z, x) * 7.0) * 0.65 + Math.cos(x * 0.35) * 0.45;
-    const blend = smoothstep(pr * 0.80 + wobble, pr * 1.18 + wobble, r);
-    splatWeight[i] = blend;
-
-    const micro = 0.93 + 0.07 * Math.sin(x * 0.85) * Math.cos(z * 0.85);
-    if (hasDualTex) {
-      // Subtle ambient modulation only — true colors come from dual Nano Banana PBR maps!
-      const shade = (1.0 - 0.10 * blend) * micro;
-      colors[i * 3] = shade;
-      colors[i * 3 + 1] = shade;
-      colors[i * 3 + 2] = shade;
-    } else {
-      cTmp.copy(cPlaza).lerp(cHill, blend).multiplyScalar(micro);
-      colors[i * 3] = cTmp.r;
-      colors[i * 3 + 1] = cTmp.g;
-      colors[i * 3 + 2] = cTmp.b;
-    }
+  if (terrain.space_stars && enc === "open_sky") {
+    group.add(buildSpaceBackdrop());
   }
-  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-  geo.setAttribute("aHillWeight", new THREE.BufferAttribute(splatWeight, 1));
-  geo.setAttribute("uv2", geo.attributes.uv);
-  geo.computeVertexNormals();
 
-  const plazaTex = terrain.texture_id ? texturesDict[terrain.texture_id] : null;
-  const hillTex = terrain.hill_texture_id ? texturesDict[terrain.hill_texture_id] : null;
-  const rep = Math.round(size / 4.2);
+  if (gkind !== "none") {
+    const [eW, , eD] = terrain.enclosure_size || [24, 8.5, 28];
+    const sizeX = isInterior ? eW : (terrain.size || 72);
+    const sizeZ = isInterior ? eD : (terrain.size || 72);
+    const segs = isInterior ? 16 : 120;
+    const geo = new THREE.PlaneGeometry(sizeX, sizeZ, segs, segs);
+    geo.rotateX(-Math.PI / 2);
 
-  const matParams = {
-    vertexColors: true,
-    roughness: 0.9,
-    metalness: 0.02,
-    envMapIntensity: 0.55,
-  };
-  if (plazaTex) {
-    matParams.map = loadRepeatTex(plazaTex.albedo_url, rep, rep, true);
-    matParams.normalMap = loadRepeatTex(plazaTex.normal_url, rep, rep, false);
-    matParams.normalScale = new THREE.Vector2(1.15, 1.15);
-    matParams.roughnessMap = loadRepeatTex(plazaTex.roughness_url, rep, rep, false);
-    if (plazaTex.ao_url) {
-      matParams.aoMap = loadRepeatTex(plazaTex.ao_url, rep, rep, false);
-      matParams.aoMapIntensity = 0.8;
+    const pos = geo.attributes.position;
+    const colors = new Float32Array(pos.count * 3);
+    const splatWeight = new Float32Array(pos.count);
+    const cPlaza = new THREE.Color(terrain.ground_color || "#8a8275");
+    const cHill = new THREE.Color(terrain.hill_color || "#4f6d3f");
+    const cTmp = new THREE.Color();
+    const pr = terrain.plaza_radius ?? 15.0;
+
+    const hasDualTex = !isInterior && Boolean(
+      terrain.texture_id && texturesDict[terrain.texture_id] && terrain.hill_texture_id && texturesDict[terrain.hill_texture_id]
+    );
+
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i);
+      const z = pos.getZ(i);
+      const y = sampleTerrainHeight(terrain, x, z);
+      pos.setY(i, y);
+
+      const r = Math.hypot(x, z);
+      let blend = 0.0;
+      if (gkind === "forest_floor" || pr <= 0.1) {
+        blend = 0.5 + 0.5 * Math.sin(x * 0.16) * Math.cos(z * 0.16);
+      } else if (!isInterior && gkind === "outdoor_hills") {
+        const wobble = Math.sin(Math.atan2(z, x) * 7.0) * 0.65 + Math.cos(x * 0.35) * 0.45;
+        blend = smoothstep(pr * 0.80 + wobble, pr * 1.18 + wobble, r);
+      }
+      splatWeight[i] = blend;
+
+      const micro = isInterior ? 1.0 : (0.93 + 0.07 * Math.sin(x * 0.85) * Math.cos(z * 0.85));
+      if (hasDualTex) {
+        const shade = (1.0 - 0.10 * blend) * micro;
+        colors[i * 3] = shade;
+        colors[i * 3 + 1] = shade;
+        colors[i * 3 + 2] = shade;
+      } else {
+        cTmp.copy(cPlaza).lerp(cHill, isInterior ? 0.0 : blend).multiplyScalar(micro);
+        colors[i * 3] = cTmp.r;
+        colors[i * 3 + 1] = cTmp.g;
+        colors[i * 3 + 2] = cTmp.b;
+      }
     }
-  }
-  const terrainMat = new THREE.MeshStandardMaterial(matParams);
+    geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    geo.setAttribute("aHillWeight", new THREE.BufferAttribute(splatWeight, 1));
+    geo.setAttribute("uv2", geo.attributes.uv);
+    geo.computeVertexNormals();
 
-  // Dual-biome PBR splat shader: cobblestones on plaza, lush Nano Banana grass/meadow on rolling hills!
-  if (plazaTex && hillTex) {
-    const hillAlb = loadRepeatTex(hillTex.albedo_url, Math.round(size / 5.5), Math.round(size / 5.5), true);
-    terrainMat.onBeforeCompile = shader => {
-      shader.uniforms.uHillMap = { value: hillAlb };
-      shader.vertexShader = shader.vertexShader
-        .replace("#include <common>", "#include <common>\nattribute float aHillWeight;\nvarying float vHillW;\nvarying vec2 vWorldXZ;")
-        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvHillW = aHillWeight;\nvWorldXZ = position.xz;");
-      shader.fragmentShader = shader.fragmentShader
-        .replace("#include <common>", "#include <common>\nuniform sampler2D uHillMap;\nvarying float vHillW;\nvarying vec2 vWorldXZ;")
-        .replace(
-          "#include <map_fragment>",
-          `#include <map_fragment>
-           vec4 hillSample = texture2D(uHillMap, vWorldXZ * 0.14);
-           diffuseColor.rgb = mix(diffuseColor.rgb, hillSample.rgb, clamp(vHillW, 0.0, 1.0));`
-        );
+    const plazaTex = terrain.texture_id ? texturesDict[terrain.texture_id] : null;
+    const hillTex = terrain.hill_texture_id ? texturesDict[terrain.hill_texture_id] : null;
+    const rep = Math.max(4, Math.round(Math.max(sizeX, sizeZ) / 4.2));
+
+    const matParams = {
+      vertexColors: true,
+      roughness: gkind === "interior_deck" ? 0.38 : 0.9,
+      metalness: gkind === "interior_deck" ? 0.65 : 0.02,
+      envMapIntensity: gkind === "interior_deck" ? 1.15 : 0.55,
     };
-  }
+    if (plazaTex) {
+      matParams.map = loadRepeatTex(plazaTex.albedo_url, rep, rep, true);
+      matParams.normalMap = loadRepeatTex(plazaTex.normal_url, rep, rep, false);
+      matParams.normalScale = new THREE.Vector2(1.15, 1.15);
+      matParams.roughnessMap = loadRepeatTex(plazaTex.roughness_url, rep, rep, false);
+      if (plazaTex.ao_url) {
+        matParams.aoMap = loadRepeatTex(plazaTex.ao_url, rep, rep, false);
+        matParams.aoMapIntensity = 0.8;
+      }
+    }
+    const terrainMat = new THREE.MeshStandardMaterial(matParams);
 
-  const mesh = new THREE.Mesh(geo, terrainMat);
-  mesh.receiveShadow = true;
-  group.add(mesh);
+    if (plazaTex && hillTex && !isInterior) {
+      const hillAlb = loadRepeatTex(hillTex.albedo_url, Math.round(sizeX / 5.5), Math.round(sizeZ / 5.5), true);
+      terrainMat.onBeforeCompile = shader => {
+        shader.uniforms.uHillMap = { value: hillAlb };
+        shader.vertexShader = shader.vertexShader
+          .replace("#include <common>", "#include <common>\nattribute float aHillWeight;\nvarying float vHillW;\nvarying vec2 vWorldXZ;")
+          .replace("#include <begin_vertex>", "#include <begin_vertex>\nvHillW = aHillWeight;\nvWorldXZ = position.xz;");
+        shader.fragmentShader = shader.fragmentShader
+          .replace("#include <common>", "#include <common>\nuniform sampler2D uHillMap;\nvarying float vHillW;\nvarying vec2 vWorldXZ;")
+          .replace(
+            "#include <map_fragment>",
+            `#include <map_fragment>
+             vec4 hillSample = texture2D(uHillMap, vWorldXZ * 0.14);
+             diffuseColor.rgb = mix(diffuseColor.rgb, hillSample.rgb, clamp(vHillW, 0.0, 1.0));`
+          );
+      };
+    }
 
-  // Segmented natural cut-stone plaza curb blocks (instead of bare plastic torus!)
-  if (terrain.style === "cobblestone_plaza") {
-    const curbMat = plazaTex
-      ? createPBRMaterial({ color: "#b7ab98", roughness: 0.88, texture_id: terrain.texture_id }, texturesDict, { repeat: 0.8, tintWeight: 0.35 })
-      : new THREE.MeshStandardMaterial({ color: "#a59b8b", roughness: 0.9 });
-    const nCurbs = 44;
-    const curbR = pr * 0.82;
-    const segLen = (2 * Math.PI * curbR) / nCurbs * 0.94;
-    for (let i = 0; i < nCurbs; i++) {
-      const a = (i / nCurbs) * Math.PI * 2;
-      const blk = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.18, segLen), curbMat);
-      blk.position.set(Math.cos(a) * curbR, 0.06, Math.sin(a) * curbR);
-      blk.rotation.y = -a;
-      blk.receiveShadow = true;
-      blk.castShadow = true;
-      group.add(blk);
+    const mesh = new THREE.Mesh(geo, terrainMat);
+    mesh.receiveShadow = true;
+    group.add(mesh);
+
+    // ONLY build cobblestone plaza curbs for actual outdoor cobblestone plazas with plaza_radius >= 6m!
+    if (!isInterior && gkind === "outdoor_hills" && terrain.style === "cobblestone_plaza" && pr >= 6.0) {
+      const curbMat = plazaTex
+        ? createPBRMaterial({ color: "#b7ab98", roughness: 0.88, texture_id: terrain.texture_id }, texturesDict, { repeat: 0.8, tintWeight: 0.35 })
+        : new THREE.MeshStandardMaterial({ color: "#a59b8b", roughness: 0.9 });
+      const nCurbs = 44;
+      const curbR = pr * 0.82;
+      const segLen = (2 * Math.PI * curbR) / nCurbs * 0.94;
+      for (let i = 0; i < nCurbs; i++) {
+        const a = (i / nCurbs) * Math.PI * 2;
+        const blk = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.18, segLen), curbMat);
+        blk.position.set(Math.cos(a) * curbR, 0.06, Math.sin(a) * curbR);
+        blk.rotation.y = -a;
+        blk.receiveShadow = true;
+        blk.castShadow = true;
+        group.add(blk);
+      }
     }
   }
 
   // Animated normal-mapped reflective water plane
   let waterMesh = null;
-  if (terrain.has_water) {
+  if (terrain.has_water && !isInterior) {
+    const size = terrain.size || 72;
     const wGeo = new THREE.PlaneGeometry(size * 1.25, size * 1.25, 48, 48);
     wGeo.rotateX(-Math.PI / 2);
     const wNorm = getWaterNormalMap().clone();
@@ -445,18 +792,23 @@ function addWindowGrid(group, w, h, d, floors, frameMat, glassMat, shutterMat, s
 }
 
 function buildRoofMaterial(obj, texturesDict) {
-  const rTexId = obj.material.roof_texture_id || (texturesDict["roof_tiles_pbr"] ? "roof_tiles_pbr" : null);
-  if (rTexId && texturesDict[rTexId]) {
-    return createPBRMaterial(obj.material, texturesDict, {
+  const rTexId = obj.material.roof_texture_id || "roof_tiles_pbr";
+  if (rTexId) {
+    const mat = createPBRMaterial(obj.material, texturesDict, {
       textureIdOverride: rTexId,
       overrideColor: obj.material.secondary_color || "#9b4935",
       repeat: 2.0,
       roughness: 0.84,
       normalStrength: 1.45,
-      tintWeight: 0.16,
+      tintWeight: 0.18,
       emissive: "#000000",
       emissiveIntensity: 0.0,
     });
+    if (!texturesDict[rTexId]) {
+      mat.normalMap = getWoodNormalMap();
+      mat.normalScale = new THREE.Vector2(0.55, 0.55);
+    }
+    return mat;
   }
   return new THREE.MeshStandardMaterial({
     color: obj.material.secondary_color || "#8d4332",
@@ -1350,6 +1702,167 @@ export function buildParametricObject(obj, texturesDict, isNight) {
 }
 
 // ---------------------------------------------------------------------------
+// Carrier 5: General-Purpose Composable 3D Part-Tree Grammar (`procedural_assembly`)
+// ---------------------------------------------------------------------------
+function makeAssemblyGeometry(part) {
+  const s = part.size || [1, 1, 1];
+  const sx = Math.max(0.02, Math.abs(s[0] ?? 1));
+  const sy = Math.max(0.02, Math.abs(s[1] ?? 1));
+  const sz = Math.max(0.02, Math.abs(s[2] ?? 1));
+
+  switch (part.shape) {
+    case "box":
+      return new THREE.BoxGeometry(sx, sy, sz);
+    case "cylinder":
+      return new THREE.CylinderGeometry(sx, sy, sz, 16);
+    case "cone":
+      return new THREE.ConeGeometry(sx, sy, 14);
+    case "sphere": {
+      const geo = new THREE.SphereGeometry(1.0, 16, 12);
+      geo.scale(sx, sy, sz);
+      return geo;
+    }
+    case "capsule":
+      return new THREE.CapsuleGeometry(sx, sy, 6, 12);
+    case "torus": {
+      const arc = THREE.MathUtils.degToRad(Math.max(20, Math.min(360, s[2] || 360)));
+      return new THREE.TorusGeometry(sx, Math.min(sx * 0.48, sy), 12, 24, arc);
+    }
+    case "arch_segment": {
+      const innerR = Math.max(0.2, sx);
+      const outerR = Math.max(innerR + 0.15, sy);
+      const shape = new THREE.Shape();
+      shape.absarc(0, 0, outerR, 0, Math.PI, false);
+      shape.absarc(0, 0, innerR, Math.PI, 0, true);
+      shape.closePath();
+      const geo = new THREE.ExtrudeGeometry(shape, { depth: sz, bevelEnabled: false, curveSegments: 18 });
+      geo.translate(0, 0, -sz * 0.5);
+      return geo;
+    }
+    case "plane":
+      return new THREE.PlaneGeometry(sx, sy);
+    case "ring":
+      return new THREE.RingGeometry(Math.min(sx, sy * 0.9), Math.max(sx + 0.05, sy), 28);
+    case "icosahedron": {
+      const geo = new THREE.IcosahedronGeometry(1.0, 1);
+      geo.scale(sx, sy, sz);
+      return geo;
+    }
+    case "dodecahedron": {
+      const geo = new THREE.DodecahedronGeometry(1.0, 1);
+      geo.scale(sx, sy, sz);
+      return geo;
+    }
+    default:
+      return new THREE.BoxGeometry(sx, sy, sz);
+  }
+}
+
+export function buildProceduralAssembly(obj, texturesDict) {
+  const spec = obj.procedural;
+  const g = new THREE.Group();
+  if (!spec || !Array.isArray(spec.parts) || spec.parts.length === 0) return g;
+
+  if ((spec.contact_ao_radius ?? 1.2) > 0.05) {
+    addContactAO(g, spec.contact_ao_radius, spec.contact_ao_radius, 0.58);
+  }
+
+  const animatedParts = [];
+  const baseMatSpec = obj.material || {};
+
+  for (const part of spec.parts) {
+    const geo = makeAssemblyGeometry(part);
+    const texId = part.texture_id !== undefined ? part.texture_id : (part.opacity < 0.95 || part.emissive_intensity > 0.5 ? null : baseMatSpec.texture_id);
+    const isTranslucent = (part.opacity ?? 1.0) < 0.99;
+
+    let mat;
+    if (isTranslucent) {
+      mat = new THREE.MeshPhysicalMaterial({
+        color: new THREE.Color(part.color || baseMatSpec.color || "#7dd3fc"),
+        roughness: part.roughness ?? 0.14,
+        metalness: part.metalness ?? 0.1,
+        emissive: new THREE.Color(part.emissive || "#000000"),
+        emissiveIntensity: part.emissive_intensity ?? 0.0,
+        transparent: true,
+        opacity: part.opacity,
+        clearcoat: 0.7,
+        side: THREE.DoubleSide,
+        depthWrite: part.opacity > 0.65,
+      });
+    } else {
+      mat = createPBRMaterial(baseMatSpec, texturesDict, {
+        overrideColor: part.color || baseMatSpec.color,
+        textureIdOverride: texId,
+        roughness: part.roughness ?? baseMatSpec.roughness ?? 0.65,
+        metalness: part.metalness ?? baseMatSpec.metalness ?? 0.12,
+        emissive: part.emissive ?? "#000000",
+        emissiveIntensity: part.emissive_intensity ?? 0.0,
+        tintWeight: texId ? 0.35 : 1.0,
+      });
+      if (part.shape === "plane" || part.shape === "ring") mat.side = THREE.DoubleSide;
+    }
+
+    const repCount = Math.max(1, Math.min(16, part.repeat_count || 1));
+    const repOff = part.repeat_offset || [0, 0, 0];
+    const repRotY = THREE.MathUtils.degToRad(part.repeat_rot_y_deg || 0);
+    const sides = part.mirror_x ? [1, -1] : [1];
+    const basePos = part.pos || [0, 0, 0];
+    const baseRot = part.rot_deg || [0, 0, 0];
+
+    for (const sgn of sides) {
+      for (let r = 0; r < repCount; r++) {
+        const m = new THREE.Mesh(geo, mat);
+        const px = (basePos[0] + repOff[0] * r) * sgn;
+        const py = basePos[1] + repOff[1] * r;
+        const pz = basePos[2] + repOff[2] * r;
+
+        if (Math.abs(repRotY) > 1e-4 && repCount > 1) {
+          const ang = repRotY * r;
+          const ca = Math.cos(ang), sa = Math.sin(ang);
+          m.position.set(px * ca - pz * sa, py, px * sa + pz * ca);
+          m.rotation.set(
+            THREE.MathUtils.degToRad(baseRot[0]),
+            THREE.MathUtils.degToRad(baseRot[1]) * sgn + ang,
+            THREE.MathUtils.degToRad(baseRot[2]) * sgn
+          );
+        } else {
+          m.position.set(px, py, pz);
+          m.rotation.set(
+            THREE.MathUtils.degToRad(baseRot[0]),
+            THREE.MathUtils.degToRad(baseRot[1]) * sgn,
+            THREE.MathUtils.degToRad(baseRot[2]) * sgn
+          );
+        }
+
+        if (part.anim && part.anim !== "none") {
+          animatedParts.push({
+            mesh: m,
+            anim: part.anim,
+            baseY: m.position.y,
+            baseRotX: m.rotation.x,
+            baseRotY: m.rotation.y,
+            baseRotZ: m.rotation.z,
+            baseEmissive: part.emissive_intensity || 1.0,
+            phase: r * 0.7 + sgn,
+          });
+        }
+        g.add(m);
+      }
+    }
+  }
+
+  if (spec.light_color && (spec.light_intensity || 0) > 0.1) {
+    const lp = spec.light_pos || [0, 2, 0];
+    const pl = new THREE.PointLight(spec.light_color, spec.light_intensity, spec.light_distance || 14, 1.6);
+    pl.position.set(lp[0], lp[1], lp[2]);
+    g.add(pl);
+  }
+
+  if (animatedParts.length > 0) g.userData.animatedParts = animatedParts;
+  return enableShadows(g);
+}
+
+// ---------------------------------------------------------------------------
 // Carrier 3: Implicit Signed Distance Field w/ Baked 3D SDF-AO + Approach B Dual-Projection Neural Shader!
 // ---------------------------------------------------------------------------
 export async function buildImplicitSDFObject(obj, texturesDict) {
@@ -1558,10 +2071,281 @@ function makeArticulatedFox(matSpec) {
   return enableShadows(g);
 }
 
+function makeArticulatedHuman(obj) {
+  const ag = obj.agent || {};
+  const matSpec = obj.material || {};
+  const g = new THREE.Group();
+  addContactAO(g, 0.42, 0.42, 0.58);
+
+  const role = ag.role || "guest";
+  const garment = ag.garment_style || (role === "bride" ? "gown_aline" : role === "groom" ? "tuxedo" : "suit");
+  const isGown = garment === "gown_aline" || garment === "gown_sheath" || garment === "dress_cocktail";
+
+  const skinMat = new THREE.MeshStandardMaterial({
+    color: ag.skin_tone || "#e5b898",
+    roughness: 0.62,
+    metalness: 0.02,
+  });
+  const hairMat = new THREE.MeshStandardMaterial({
+    color: ag.hair_color || (role === "bride" ? "#4b2e1e" : "#251c16"),
+    roughness: 0.72,
+    metalness: 0.05,
+  });
+  const primaryMat = new THREE.MeshPhysicalMaterial({
+    color: matSpec.color || (role === "bride" ? "#fbf6ee" : "#1a1d24"),
+    roughness: matSpec.roughness ?? (isGown ? 0.44 : 0.64),
+    metalness: matSpec.metalness ?? 0.03,
+    sheen: isGown ? 0.85 : 0.35,
+    sheenRoughness: 0.5,
+    sheenColor: new THREE.Color(matSpec.secondary_color || "#ffffff"),
+  });
+  const secondaryMat = new THREE.MeshStandardMaterial({
+    color: matSpec.secondary_color || "#f3efe8",
+    roughness: 0.55,
+  });
+  const accentMat = new THREE.MeshStandardMaterial({
+    color: matSpec.accent_color || "#d8a86a",
+    roughness: 0.42,
+    metalness: 0.25,
+  });
+  const shoeMat = new THREE.MeshStandardMaterial({
+    color: isGown ? "#ede5d8" : "#17171a",
+    roughness: 0.35,
+    metalness: 0.15,
+  });
+  const eyeWhiteMat = new THREE.MeshStandardMaterial({ color: "#f6f6f6", roughness: 0.18 });
+  const irisMat = new THREE.MeshStandardMaterial({ color: "#322218", roughness: 0.12 });
+
+  // Lower body: articulated legs (hidden/layered inside gown for bridal silhouette, visible for suits/cocktail)
+  const legs = [];
+  const legLen = 0.82;
+  const hipY = 0.88;
+  for (const [side, lx, phase] of [[-1, -0.105, 0], [1, 0.105, Math.PI]]) {
+    const hip = new THREE.Group();
+    hip.position.set(lx, hipY, 0);
+    const upper = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.082, 0.068, legLen * 0.52, 10),
+      isGown ? skinMat : primaryMat
+    );
+    upper.position.y = -legLen * 0.26;
+    hip.add(upper);
+    const lower = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.064, 0.048, legLen * 0.48, 10),
+      isGown ? skinMat : primaryMat
+    );
+    lower.position.y = -legLen * 0.72;
+    hip.add(lower);
+    const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.095, 0.075, 0.22), shoeMat);
+    shoe.position.set(0, -legLen + 0.01, 0.045);
+    hip.add(shoe);
+    hip.userData.phase = phase;
+    hip.userData.side = side;
+    g.add(hip);
+    legs.push(hip);
+  }
+
+  // Flowing Gown / Skirt geometry (for Bride or female guests)
+  let skirtMesh = null;
+  if (garment === "gown_aline") {
+    const skirtGeo = new THREE.CylinderGeometry(0.175, 0.64, 0.96, 22, 4);
+    const sPos = skirtGeo.attributes.position;
+    for (let i = 0; i < sPos.count; i++) {
+      const vx = sPos.getX(i), vy = sPos.getY(i), vz = sPos.getZ(i);
+      const ang = Math.atan2(vz, vx);
+      const flare = Math.max(0, (0.48 - vy) / 0.96);
+      const pleat = 1.0 + 0.06 * Math.sin(ang * 10.0) * flare;
+      // Gentle bridal train extending toward -Z (back)
+      const trainZ = vz < 0 ? vz * (1.0 + 0.38 * flare) : vz;
+      sPos.setXYZ(i, vx * pleat, vy, trainZ * pleat);
+    }
+    skirtGeo.computeVertexNormals();
+    skirtMesh = new THREE.Mesh(skirtGeo, primaryMat);
+    skirtMesh.position.set(0, 0.52, -0.02);
+    g.add(skirtMesh);
+  } else if (garment === "gown_sheath") {
+    skirtMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.29, 0.94, 18), primaryMat);
+    skirtMesh.position.set(0, 0.52, 0);
+    g.add(skirtMesh);
+  } else if (garment === "dress_cocktail") {
+    skirtMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.34, 0.62, 18), primaryMat);
+    skirtMesh.position.set(0, 0.68, 0);
+    g.add(skirtMesh);
+  }
+
+  // Sculpted Torso / Bodice / Tailored Jacket
+  const torsoGroup = new THREE.Group();
+  torsoGroup.position.set(0, hipY, 0);
+  const torsoW = isGown ? 0.17 : 0.21;
+  const torso = new THREE.Mesh(
+    new THREE.CylinderGeometry(torsoW * 1.12, torsoW * 0.88, 0.50, 14),
+    primaryMat
+  );
+  torso.scale.set(1.15, 1.0, 0.72);
+  torso.position.y = 0.26;
+  torsoGroup.add(torso);
+
+  // Shoulders
+  const shoulders = new THREE.Mesh(new THREE.SphereGeometry(torsoW * 1.14, 14, 10), isGown ? skinMat : primaryMat);
+  shoulders.scale.set(1.22, 0.45, 0.68);
+  shoulders.position.y = 0.49;
+  torsoGroup.add(shoulders);
+
+  // Tuxedo / Suit shirt V-front, bow tie, lapels & boutonniere
+  if (garment === "tuxedo" || garment === "suit") {
+    const shirt = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.28, 4), secondaryMat);
+    shirt.rotation.z = Math.PI;
+    shirt.rotation.y = Math.PI / 4;
+    shirt.scale.set(1.0, 1.0, 0.26);
+    shirt.position.set(0, 0.39, 0.13);
+    torsoGroup.add(shirt);
+    const tie = new THREE.Mesh(new THREE.BoxGeometry(0.095, 0.038, 0.03), garment === "tuxedo" ? primaryMat : accentMat);
+    tie.position.set(0, 0.48, 0.15);
+    torsoGroup.add(tie);
+    if (role === "groom") {
+      const rose = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 8), new THREE.MeshStandardMaterial({ color: "#fff8f4", roughness: 0.5 }));
+      rose.position.set(0.11, 0.41, 0.145);
+      torsoGroup.add(rose);
+    }
+  } else if (isGown) {
+    // Delicate waist sash / lace trim
+    const sash = new THREE.Mesh(new THREE.TorusGeometry(0.165, 0.025, 8, 18), secondaryMat);
+    sash.rotation.x = Math.PI / 2;
+    sash.scale.set(1.08, 0.78, 1.0);
+    sash.position.y = 0.08;
+    torsoGroup.add(sash);
+  }
+
+  // Neck + Articulated Head Pivot (allows natural gaze tracking toward partner!)
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.064, 0.12, 10), skinMat);
+  neck.position.y = 0.56;
+  torsoGroup.add(neck);
+
+  const headPivot = new THREE.Group();
+  headPivot.position.set(0, 0.63, 0);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.125, 16, 14), skinMat);
+  head.scale.set(0.88, 1.08, 0.94);
+  head.position.y = 0.10;
+  headPivot.add(head);
+
+  // Expressive Eyes, Nose & Smile
+  for (const ex of [-0.044, 0.044]) {
+    const eyeW = new THREE.Mesh(new THREE.SphereGeometry(0.018, 8, 8), eyeWhiteMat);
+    eyeW.position.set(ex, 0.115, 0.102);
+    headPivot.add(eyeW);
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.011, 8, 8), irisMat);
+    pupil.position.set(ex, 0.115, 0.114);
+    headPivot.add(pupil);
+  }
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.016, 0.045, 6), skinMat);
+  nose.rotation.x = Math.PI / 2;
+  nose.position.set(0, 0.095, 0.122);
+  headPivot.add(nose);
+
+  // Hairstyle (romantic bridal updo vs neat tailored short hair)
+  const hairCap = new THREE.Mesh(new THREE.SphereGeometry(0.132, 14, 12, 0, Math.PI * 2, 0, Math.PI * 0.62), hairMat);
+  hairCap.scale.set(0.92, 1.06, 0.98);
+  hairCap.position.set(0, 0.115, -0.01);
+  headPivot.add(hairCap);
+  if (isGown) {
+    const bun = new THREE.Mesh(new THREE.SphereGeometry(0.082, 12, 10), hairMat);
+    bun.position.set(0, 0.11, -0.12);
+    headPivot.add(bun);
+    const sideHair = new THREE.Mesh(new THREE.CylinderGeometry(0.118, 0.105, 0.16, 12, 1, false, Math.PI * 0.55, Math.PI * 0.9), hairMat);
+    sideHair.position.set(0, 0.06, -0.02);
+    headPivot.add(sideHair);
+  }
+
+  // Sheer Flowing Cathedral Bridal Veil attached to back of head
+  let veilMesh = null;
+  if (ag.has_veil) {
+    const veilMat = new THREE.MeshPhysicalMaterial({
+      color: "#ffffff",
+      roughness: 0.35,
+      transparent: true,
+      opacity: 0.42,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const veilGeo = new THREE.PlaneGeometry(0.72, 1.35, 8, 12);
+    const vPos = veilGeo.attributes.position;
+    for (let i = 0; i < vPos.count; i++) {
+      const vx = vPos.getX(i), vy = vPos.getY(i);
+      const tDown = (0.675 - vy) / 1.35;
+      const arch = -0.16 - tDown * 0.34 - Math.sin(tDown * Math.PI) * 0.12;
+      const flareX = vx * (0.38 + tDown * 0.95);
+      vPos.setXYZ(i, flareX, vy - 0.65, arch);
+    }
+    veilGeo.computeVertexNormals();
+    veilMesh = new THREE.Mesh(veilGeo, veilMat);
+    veilMesh.position.set(0, 0.14, -0.02);
+    headPivot.add(veilMesh);
+  }
+  torsoGroup.add(headPivot);
+
+  // Articulated Arms + Optional Bridal Rose Bouquet
+  const arms = [];
+  for (const [side, ax, phase] of [[-1, -(torsoW * 1.32), Math.PI], [1, torsoW * 1.32, 0]]) {
+    const shoulder = new THREE.Group();
+    shoulder.position.set(ax, 0.47, 0);
+    const upperA = new THREE.Mesh(new THREE.CylinderGeometry(0.048, 0.042, 0.28, 8), isGown ? skinMat : primaryMat);
+    upperA.position.y = -0.14;
+    shoulder.add(upperA);
+    const foreA = new THREE.Mesh(new THREE.CylinderGeometry(0.040, 0.032, 0.26, 8), isGown ? skinMat : primaryMat);
+    foreA.position.set(0, -0.39, ag.has_bouquet ? 0.08 : 0.02);
+    if (ag.has_bouquet) foreA.rotation.x = -0.72;
+    shoulder.add(foreA);
+    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.038, 8, 8), skinMat);
+    hand.position.set(0, ag.has_bouquet ? -0.44 : -0.53, ag.has_bouquet ? 0.21 : 0.04);
+    shoulder.add(hand);
+    shoulder.userData.phase = phase;
+    shoulder.userData.side = side;
+    if (ag.has_bouquet) {
+      shoulder.rotation.z = -side * 0.22;
+      shoulder.rotation.x = -0.35;
+    }
+    torsoGroup.add(shoulder);
+    arms.push(shoulder);
+  }
+
+  if (ag.has_bouquet) {
+    const bq = new THREE.Group();
+    bq.position.set(0, 0.06, 0.26);
+    const leafMat = new THREE.MeshStandardMaterial({ color: "#436e42", roughness: 0.78 });
+    const stem = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.18, 8), leafMat);
+    stem.rotation.x = Math.PI;
+    stem.position.y = -0.06;
+    bq.add(stem);
+    const roseCols = ["#fff8f4", "#f6cfd5", "#fff2e6", "#eab5be"];
+    for (let i = 0; i < 9; i++) {
+      const a = (i / 9) * Math.PI * 2;
+      const r = i === 0 ? 0 : 0.075;
+      const fl = new THREE.Mesh(
+        new THREE.DodecahedronGeometry(0.046, 0),
+        new THREE.MeshStandardMaterial({ color: roseCols[i % roseCols.length], roughness: 0.55 })
+      );
+      fl.position.set(Math.cos(a) * r, 0.03 + (i % 2) * 0.025, Math.sin(a) * r);
+      bq.add(fl);
+    }
+    torsoGroup.add(bq);
+  }
+
+  g.add(torsoGroup);
+  g.userData.humanRig = { legs, arms, headPivot, torsoGroup, skirtMesh, veilMesh, hasBouquet: Boolean(ag.has_bouquet) };
+  return enableShadows(g);
+}
+
 export function buildArticulatedAgent(obj, texturesDict) {
   const ag = obj.agent || { rig_kind: "bird_flock", count: 5, entity_scale: 1.0 };
   const root = new THREE.Group();
   const sc = ag.entity_scale || 1.0;
+
+  if (ag.rig_kind === "human_character") {
+    const human = makeArticulatedHuman(obj);
+    human.scale.setScalar(sc);
+    root.add(human);
+    root.userData.humanMesh = human;
+    return root;
+  }
 
   if (ag.rig_kind === "bird_flock") {
     const matBody = new THREE.MeshStandardMaterial({ color: obj.material.color || "#3a6ea5", roughness: 0.62 });

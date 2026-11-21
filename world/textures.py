@@ -24,13 +24,19 @@ from PIL import Image
 load_dotenv()
 
 NANO_BANANA_MODEL = "gemini-nano-banana-2.1"
+PROVISIONAL_TEXTURE_MODEL = "gemini-3.1-flash-lite-image"
+
+_CLIENT: genai.Client | None = None
 
 
 def _get_client() -> genai.Client:
-    key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-    if not key:
-        raise RuntimeError("GEMINI_API_KEY is not set")
-    return genai.Client(api_key=key)
+    global _CLIENT
+    if _CLIENT is None:
+        key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        if not key:
+            raise RuntimeError("GEMINI_API_KEY is not set")
+        _CLIENT = genai.Client(api_key=key)
+    return _CLIENT
 
 
 def make_seamless_tile(rgb: np.ndarray, blend_frac: float = 0.14) -> np.ndarray:
@@ -101,8 +107,10 @@ def synthesize_pbr_texture(
     material_prompt: str,
     out_dir: pathlib.Path,
     size: int = 512,
+    model: str = NANO_BANANA_MODEL,
+    tag: str = "",
 ) -> tuple[dict, float]:
-    """Generate a seamless tileable PBR texture set (albedo + normal + roughness + AO) via Nano Banana 2.1."""
+    """Generate a seamless tileable PBR texture set (albedo + normal + roughness + AO)."""
     client = _get_client()
     full_prompt = (
         f"Photorealistic seamless tileable 2D PBR albedo surface texture of: {material_prompt}. "
@@ -112,7 +120,7 @@ def synthesize_pbr_texture(
     )
     t0 = time.perf_counter()
     resp = client.models.generate_content(
-        model=NANO_BANANA_MODEL,
+        model=model,
         contents=full_prompt,
         config=types.GenerateContentConfig(response_modalities=["IMAGE"]),
     )
@@ -126,7 +134,7 @@ def synthesize_pbr_texture(
                 raw_img = Image.open(io.BytesIO(inline.data)).convert("RGB")
                 break
     if raw_img is None:
-        raise RuntimeError(f"Nano Banana returned no texture for {tex_id}")
+        raise RuntimeError(f"{model} returned no texture for {tex_id}")
 
     side = min(raw_img.width, raw_img.height)
     x0 = (raw_img.width - side) // 2
@@ -136,10 +144,11 @@ def synthesize_pbr_texture(
     seamless = make_seamless_tile(np.asarray(sq))
     normal_rgb, rough_u8, ao_u8 = derive_pbr_maps(seamless)
 
-    albedo_name = f"tex_{tex_id}_albedo.jpg"
-    normal_name = f"tex_{tex_id}_normal.jpg"
-    rough_name = f"tex_{tex_id}_rough.jpg"
-    ao_name = f"tex_{tex_id}_ao.jpg"
+    suffix = f"_{tag}" if tag else ""
+    albedo_name = f"tex_{tex_id}{suffix}_albedo.jpg"
+    normal_name = f"tex_{tex_id}{suffix}_normal.jpg"
+    rough_name = f"tex_{tex_id}{suffix}_rough.jpg"
+    ao_name = f"tex_{tex_id}{suffix}_ao.jpg"
 
     Image.fromarray(seamless).save(out_dir / albedo_name, quality=92)
     Image.fromarray(normal_rgb).save(out_dir / normal_name, quality=90)

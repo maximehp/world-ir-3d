@@ -1,20 +1,25 @@
-# WorldIR 3D — Persistent Multi-Carrier Generative 3D World Engine
+# WorldIR 3D — Streamed Parallel Multi-Carrier 3D World & Appearance-Anchored Cinema Video Engine
 
-A full-3D generative world representation and live WebGL2 studio where worlds are compiled into persistent, Blender-style object collections rather than flat 2D/2.5D pixel sequences. Every viewpoint, camera path, and surgical chat edit operates directly on persistent 3D state.
+A real-time, persistent 3D World IR and appearance-anchored cinematic video architecture where natural-language prompts compile into genuinely distinct, independently editable 3D worlds (weddings, spaceship interiors, primeval forests, architectural courtyards, etc.) rather than flat 2D pixel sequences or hardcoded village templates.
 
 ## Architecture Overview
 
-- **Authoritative World IR (`world/schema.py`):** Typed Pydantic v2 scene graph organized into collections (`architecture`, `landmarks`, `nature`, `vehicles`, `agents`, `props`, `lighting`) with immutable revision snapshots and 0-call Undo.
-- **Four Hybrid 3D Geometry Carriers:**
-  1. **Analytic Heightfield Terrain & Water (`world/static/builders.js`):** Continuous $h(x, z)$ heightfield with automatic plaza flattening and reflective water planes.
-  2. **Parametric Multi-Part 3D Assemblies (`world/static/builders.js`):** 360°-detailed architectural, natural, and vehicle structures (recessed glowing windows on all sides, pitched roofs, tiered fountains with animated 3D water jets, walkable vaulted arches, branching trees, windmills, lighthouses, lamps with real `PointLight`s).
-  3. **Implicit Smooth-Min SDF -> Marching Cubes (`world/sdf_compiler.py`):** Custom organic/sculptural 3D geometry mathematically synthesized live by Gemini 4 Carbon (`smooth_union`, `smooth_subtract`, `mirror_x`) and compiled into watertight smooth meshes with analytic $\nabla\text{SDF}$ normals and triplanar UVs (`~36 ms`).
-  4. **Articulated Autonomous Agents (`world/static/builders.js`, `world/static/studio.js`):** Multi-part animated rigs (flapping/banking/perching bird flocks, trotting foxes, patrolling vehicles/boats, floating lanterns) with target-referencing behavior state machines preserved across edits.
-- **Seamless PBR Material Synthesis (`world/textures.py`):** Nano Banana 2.1 generates tileable albedo textures; toroidal crossfade + wrap-padded Sobel filtering deterministically derives matching tangent-space normal and roughness maps.
-- **Dual Gemini 4 Roles (`world/gemini_3d.py`):**
-  - **Gemini 4 Carbon (`gemini-4-carbon`):** Compiles unseen natural-language prompts into multi-carrier 3D worlds and compiles chat edits into minimal surgical diffs without rebuilding unrelated objects.
-  - **Gemini 4 Hydrogen (`gemini-4-hydrogen`):** Independently audits a live 4-viewpoint 3D WebGL render plate (Elevated 3/4 Overview, Eye-Level Front, Opposite 180° Back, Hero Close-Up) and can emit bounded spatial fixes.
-- **Real-Time WebGL2 Studio (`world/static/`):** Vendored Three.js `0.170.0`, ACESFilmic tone mapping, 2048px `PCFSoftShadowMap`, dynamic sky-dome PMREM reflections, free **WASD + Mouse Look** walking/flying, 360° orbit + click-to-select, and surgical live hot-patching.
+- **Authoritative Persistent World IR (`world/schema.py`, `world/coordinator.py`):**
+  - Typed Pydantic v2 scene graph with a **Single-Writer Deterministic Coordinator** enforcing monotonic operation sequencing (`seq`), 2D footprint de-collision across parallel workers, user-edit lock protection during live streaming, monotonic PBR refinement, immutable snapshots, and 0-call Undo.
+- **Five General-Purpose 3D Carriers (`world/static/builders.js`, `world/sdf_compiler.py`):**
+  1. **General Environment Floor, Terrain & Architectural Enclosures:** Outdoor heightfields, continuous forest floors with canopy/sunbeams, flat architectural floors, and full 3D interiors (`space_bridge` with 3D deep-space starfield & ringed planet viewport, `sci_fi_corridor`, `interior_room`, `cathedral_hall`).
+  2. **Composable 3D Part-Tree Grammar (`procedural_assembly`):** Expressive validated assembly grammar (11 primitive shapes, bilateral `mirror_x`, linear & radial `repeat_count`, glass/hologram translucency, emissive glow, attached `PointLight`s, and deterministic part animation) enabling arbitrary scenes without a giant hardcoded asset library.
+  3. **Implicit Smooth-Min SDF -> Marching Cubes (`implicit_sdf`):** Watertight organic/sculptural 3D meshes with analytic $\nabla\text{SDF}$ normals and baked 5-tap 3D SDF Ambient Occlusion (`~10–35 ms`).
+  4. **Articulated Human Characters & Autonomous Agents (`articulated_agent`):** Multi-part `human_character` rigs (bride with gown/veil/bouquet, groom, officiant, guests, bridge crew) with coordinated deterministic performances (`walk_path`, `stand_and_face`) plus optional wildlife/vehicles evaluated purely at timestamp `t` (`evaluateWorldAt(t)`).
+  5. **Optional Reusable Parametric Builders (`parametric_assembly`):** Reusable architectural/natural components used only when they genuinely match the user's intent.
+- **Massively Parallel Cloud Streaming & Sub-Second Editing (`world/stream_pipeline.py`):**
+  - **Gemini 3.5 Flash Lite:** Intent-driven scaffold manifest (`~1.5–3s` TTFV) + sub-second surgical diff compiler (`~0.8–1.4s` Time to First Visible Change).
+  - **Gemini 4 Carbon:** Parallel NDJSON Hero Assembly, Spatial Structure, and Implicit SDF workers.
+  - **Gemini 4 Hydrogen:** Parallel Environment Detail, Characters/Cameras workers, Adjacent-Region Expansion, and Independent 4-View Prompt-Coverage Visual Auditor.
+  - **Nano Banana 2 Lite + Nano Banana 2.1:** Parallel two-stage progressive seamless PBR synthesis hot-swapped in place onto live 3D materials without resetting object identities or interrupting navigation/editing.
+- **Appearance-Anchored Generative Video Pipeline (`world/video_pipeline.py`):**
+  - Caches photorealistic **Scene References** and 3-view **Canonical Entity Turnaround Sheets** (`Front / 3/4 Side / Back`) in parallel by persistent `(entity_id, appearance_hash)` so edits regenerate only affected entities.
+  - Synthesizes synchronized 24 FPS H.264 MP4 cinema shots conditioned on deterministic 3D RGB + G-Buffer (`Depth | World Normals | Object-ID`) + persistent appearance references + temporal window anchors + bidirectional occlusion-aware DIS optical flow interpolation.
 
 ## Quick Start
 
@@ -26,7 +31,7 @@ uv sync
 uv run uvicorn world.server:app --host 127.0.0.1 --port 8000
 ```
 
-Open `http://127.0.0.1:8000` in your browser. Press `F` (or click **Walk Mode**) for WASD + mouse-look navigation, or drag/scroll in **Orbit Camera** and click objects to select them for targeted chat edits.
+Open `http://127.0.0.1:8000` in your browser. Click **Wedding Ceremony**, **Spaceship Interior**, or **Dense Forest** -> **Stream 3D World** to watch validated 3D objects stream live while orbiting, walking (`F` + WASD), scrubbing deterministic time `t`, switching independent camera trajectories, or applying live 1-second surgical edits.
 
 ## Running Reproducible Local Tests (No API Spend)
 
@@ -34,4 +39,4 @@ Open `http://127.0.0.1:8000` in your browser. Press `F` (or click **Walk Mode**)
 uv run python tests/test_world_ir.py
 ```
 
-See `RESULTS.md` for measured timings, multi-turn surgical edit logs, and honest technical limitations.
+See `RESULTS.md` for full empirical profiling, streamed latency tables, three-domain prompt-coverage audits, adjacent-region persistence tests, the Appearance-Anchored Wedding Video A/B experiment, and our next concrete research plan toward real-time photorealistic human performances.

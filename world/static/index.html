@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>WorldIR 3D — Persistent Multi-Carrier Generative 3D World Studio</title>
+  <title>WorldIR 3D — Streamed Parallel 3D World &amp; Cinematic Video Studio</title>
   <style>
     :root {
       --bg: #090b10;
@@ -36,18 +36,19 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 0 14px;
-      gap: 10px;
+      padding: 0 12px;
+      gap: 8px;
     }
-    .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+    .brand { display: flex; align-items: center; gap: 6px; font-weight: 600; flex-wrap: nowrap; overflow: hidden; }
     .pill {
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: 10.5px;
-      padding: 2px 7px;
+      font-size: 10px;
+      padding: 2px 6px;
       border-radius: 4px;
       border: 1px solid var(--border);
       background: var(--panel2);
       color: var(--muted);
+      white-space: nowrap;
     }
     .pill.c { border-color: #264d73; color: var(--accent); }
     .pill.h { border-color: #4a3573; color: var(--purple); }
@@ -56,7 +57,7 @@
 
     .workspace {
       display: grid;
-      grid-template-columns: 300px 1fr 310px;
+      grid-template-columns: 310px 1fr 315px;
       min-height: 0;
       overflow: hidden;
     }
@@ -66,7 +67,7 @@
       padding: 10px;
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 9px;
     }
     .sidebar.left { border-right: 1px solid var(--border); }
     .sidebar.right { border-left: 1px solid var(--border); }
@@ -78,17 +79,12 @@
       overflow: hidden;
       background: #06080d;
     }
-    #viewport3d {
-      width: 100%;
-      height: 100%;
-      display: block;
-      outline: none;
-    }
+    #viewport3d { width: 100%; height: 100%; display: block; outline: none; }
     .vp-hud {
       position: absolute;
       top: 10px;
       left: 10px;
-      background: rgba(9, 11, 16, 0.78);
+      background: rgba(9, 11, 16, 0.80);
       border: 1px solid rgba(255,255,255,0.12);
       border-radius: 6px;
       padding: 7px 10px;
@@ -96,22 +92,40 @@
       font-size: 11px;
       line-height: 1.45;
       pointer-events: none;
-      max-width: 440px;
+      max-width: 480px;
     }
-    .vp-controls {
+    .vp-bottom {
       position: absolute;
-      bottom: 12px;
+      bottom: 10px;
       left: 50%;
       transform: translateX(-50%);
       display: flex;
+      flex-direction: column;
       gap: 6px;
-      background: rgba(12, 16, 24, 0.86);
+      align-items: center;
+      max-width: 96%;
+    }
+    .vp-controls, .vp-timeline {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      background: rgba(12, 16, 24, 0.88);
       border: 1px solid var(--border);
-      padding: 6px 8px;
+      padding: 5px 8px;
       border-radius: 8px;
       backdrop-filter: blur(8px);
+      flex-wrap: wrap;
     }
-    .vp-controls button { padding: 5px 9px; font-size: 11.5px; }
+    .vp-controls button, .vp-timeline button { padding: 4px 8px; font-size: 11px; }
+    .vp-timeline select {
+      background: #0c1018;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 3px 6px;
+      font-size: 11px;
+    }
+    .vp-timeline input[type="range"] { width: 170px; accent-color: var(--accent); }
 
     .card {
       background: var(--panel2);
@@ -138,7 +152,7 @@
       border: 1px solid var(--border);
       color: var(--text);
       border-radius: 5px;
-      padding: 7px 8px;
+      padding: 6px 8px;
       font-family: inherit;
       font-size: 12px;
       resize: vertical;
@@ -149,7 +163,7 @@
       color: var(--text);
       border: 1px solid var(--border);
       border-radius: 5px;
-      padding: 6px 9px;
+      padding: 5px 8px;
       font-size: 11.5px;
       font-weight: 500;
       cursor: pointer;
@@ -163,13 +177,12 @@
     .row { display: flex; gap: 6px; align-items: center; }
     .row > * { flex: 1; }
     .wrap { display: flex; flex-wrap: wrap; gap: 5px; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
-    .status { font-family: ui-monospace, monospace; font-size: 11px; color: var(--accent); min-height: 14px; line-height: 1.35; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px; }
+    .status { font-family: ui-monospace, monospace; font-size: 10.5px; color: var(--accent); min-height: 14px; line-height: 1.35; }
 
-    /* Blender-style Collection Outliner */
     .collection-group { display: flex; flex-direction: column; gap: 3px; }
     .collection-hdr {
-      font-size: 10.5px;
+      font-size: 10px;
       font-weight: 600;
       color: var(--muted);
       text-transform: uppercase;
@@ -181,7 +194,7 @@
       align-items: center;
       justify-content: space-between;
       gap: 6px;
-      padding: 5px 7px;
+      padding: 4px 7px;
       border-radius: 4px;
       background: #0e121a;
       border: 1px solid transparent;
@@ -192,7 +205,7 @@
     .obj-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .carrier-tag {
       font-family: ui-monospace, monospace;
-      font-size: 9.5px;
+      font-size: 9px;
       padding: 1px 5px;
       border-radius: 3px;
       flex-shrink: 0;
@@ -203,26 +216,21 @@
 
     .kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
     .kpi { background: #0c1017; border: 1px solid var(--border); border-radius: 4px; padding: 5px; text-align: center; }
-    .kpi .v { font-size: 14px; font-weight: 700; font-family: ui-monospace, monospace; }
-    .kpi .k { font-size: 9.5px; color: var(--muted); }
+    .kpi .v { font-size: 13.5px; font-weight: 700; font-family: ui-monospace, monospace; }
+    .kpi .k { font-size: 9px; color: var(--muted); }
 
     .rev-item {
       background: #0d1119;
       border: 1px solid var(--border);
       border-radius: 5px;
-      padding: 7px;
+      padding: 6px 7px;
       font-size: 11px;
-      line-height: 1.4;
+      line-height: 1.38;
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: 3px;
     }
-    .audit-img {
-      width: 100%;
-      border-radius: 4px;
-      border: 1px solid var(--border);
-      cursor: pointer;
-    }
+    .audit-img { width: 100%; border-radius: 4px; border: 1px solid var(--border); cursor: pointer; }
     .world-chip {
       padding: 6px 8px;
       background: #0d1119;
@@ -242,66 +250,70 @@
       border: 1px solid var(--border); border-radius: 8px; padding: 12px;
       display: flex; flex-direction: column; gap: 8px;
     }
-    .modal-box img { max-width: 100%; max-height: 78vh; object-fit: contain; border-radius: 4px; }
+    .modal-box img, .modal-box video { max-width: 100%; max-height: 76vh; object-fit: contain; border-radius: 4px; }
   </style>
 </head>
 <body>
   <header>
     <div class="brand">
       <span>WorldIR 3D</span>
-      <span class="pill">Full 3D Hybrid Multi-Carrier Engine</span>
-      <span class="pill c">Carbon: World &amp; Diff Compiler</span>
-      <span class="pill h">Hydrogen: 4-View 3D Auditor</span>
-      <span class="pill">Nano Banana: Seamless PBR</span>
+      <span class="pill c">Carbon: SDF + Arch</span>
+      <span class="pill h">Hydrogen: Agents + Audit</span>
+      <span class="pill w">NB 2.1: PBR + Refs</span>
     </div>
     <div class="wrap">
-      <span id="localityBadge" class="pill g">Persistent 3D Scene Graph</span>
+      <span id="genLatencyBadge" class="pill c">Gen: --</span>
+      <span id="editLatencyBadge" class="pill g">Edit: --</span>
+      <span id="localityBadge" class="pill">Persistent IR</span>
       <span id="fpsBadge" class="pill">-- FPS</span>
     </div>
   </header>
 
   <div class="workspace">
-    <!-- LEFT: Generate World + Surgical Chat Edits + Saved Worlds -->
+    <!-- LEFT: Stream World + Sub-Second Surgical Edits + Region/Video + Saved Worlds -->
     <aside class="sidebar left">
       <div class="card">
-        <div class="card-title">1. Generate Full 3D World</div>
-        <textarea id="worldPrompt" rows="3" placeholder="Describe any small 3D world with buildings, landmarks, organic sculptures, and moving creatures/vehicles..."></textarea>
+        <div class="card-title">1. Parallel Streamed World Generation</div>
+        <textarea id="worldPrompt" rows="3" placeholder="Describe any persistent 3D cinematic world..."></textarea>
         <div class="wrap">
-          <button type="button" class="preset-btn" data-p="A sunlit Mediterranean hill village plaza with a central tiered stone fountain, a tall stone clock tower, four cozy terracotta cottages with balconies, cypress trees, a carved marble owl statue on a pedestal, a red vintage scooter patrolling the plaza, and a flock of blue birds circling and landing on the clock tower roof.">Mediterranean Village</button>
-          <button type="button" class="preset-btn" data-p="A misty Nordic harbor cove at golden hour with a red-and-white lighthouse, timber fishing cottages, a stone archway, pine trees, a wooden windmill with spinning sails, a sculptural mossy sea-serpent rock monument, a sailboat cruising the water, and white seabirds circling the lighthouse.">Nordic Harbor</button>
-          <button type="button" class="preset-btn" data-p="A twilight lantern garden courtyard with a central carved stone archway, a tranquil pavilion gazebo, cherry blossom trees, warm iron lampposts, an organic sculpted glowing crystal lotus fountain centerpiece, a red fox trotting around the courtyard, and floating paper lanterns drifting above the gazebo.">Twilight Lantern Garden</button>
+          <button type="button" class="preset-btn" data-p="A romantic sunlit garden wedding ceremony along a floral petal aisle leading to a rose-covered silk ceremony arch, flanked by rows of wooden guest pews, floral urn pedestals, string fairy lights, a bride in an ivory lace gown and veil walking down the aisle toward her smiling groom in a black tuxedo, an officiant, seated wedding guests turning to watch, and white doves circling overhead.">Wedding Ceremony</button>
+          <button type="button" class="preset-btn" data-p="The sleek futuristic command bridge interior of a deep-space exploration starship overlooking a glowing nebula and ringed planet through a panoramic forward viewport, featuring a central glowing cyan holographic star-map table, an elevated captain command chair, curved dual helm consoles with luminous status monitors, a pulsing warp core column, structural hull bulkheads, and uniformed bridge crew officers at their stations.">Spaceship Interior</button>
+          <button type="button" class="preset-btn" data-p="A misty primeval dense ancient forest with towering gnarled mossy giant trees and thick overarching canopy, a winding woodland brook, a massive fallen hollow mossy log, weathered granite boulder outcrops, clusters of giant forest ferns, glowing turquoise bioluminescent mushrooms, a red fox patrolling the mossy trail, and forest birds darting beneath the boughs.">Dense Forest</button>
         </div>
-        <button id="btnGenerate" class="primary">Compile 3D World</button>
+        <div class="row">
+          <button id="btnGenerate" class="primary">Stream 3D World</button>
+          <button id="btnLoadWedding" title="Load deterministic scripted 3D Courtyard Wedding Benchmark">Wedding Bench</button>
+        </div>
         <div id="genStatus" class="status"></div>
       </div>
 
       <div class="card">
         <div class="card-title">
-          <span>2. Surgical Chat Modification</span>
-          <button id="btnUndo" style="padding:2px 7px; font-size:10.5px;">Undo (0 calls)</button>
+          <span>2. Fast Surgical Edit (Live During Stream!)</span>
+          <button id="btnUndo" style="padding:2px 7px; font-size:10px;">Undo (0 calls)</button>
         </div>
         <div id="selectedHint" class="mono" style="color:var(--muted);">Selected: none (click any 3D object or Outliner item)</div>
-        <textarea id="chatEdit" rows="2" placeholder="e.g. 'Make the birds circle the fountain instead' / 'Turn the clock tower into mossy obsidian brick' / 'Switch to moonlit night' / 'Add a marble fox statue'"></textarea>
+        <textarea id="chatEdit" rows="2" placeholder="1-2s edits: move/scale, change behavior, night lighting, swap dress color, new camera shot, add SDF statue..."></textarea>
         <div class="wrap">
-          <button type="button" class="edit-chip" data-e="Make the birds circle and land on the central fountain instead of the tower.">Birds → Fountain</button>
-          <button type="button" class="edit-chip" data-e="Change the clock tower walls to weathered mossy dark obsidian stone with bright amber glowing windows.">Restyle Tower PBR</button>
-          <button type="button" class="edit-chip" data-e="Switch the atmosphere to moonlit night with warm glowing cottage windows and bright lampposts.">Moonlit Night</button>
-          <button type="button" class="edit-chip" data-e="Add a smooth carved emerald jade fox statue on a stone pedestal near the plaza edge.">Add SDF Statue</button>
+          <button type="button" class="edit-chip" data-e="Make the birds circle and land on the central fountain instead.">Birds → Fountain</button>
+          <button type="button" class="edit-chip" data-e="Switch the atmosphere to moonlit night with warm glowing windows and bright lampposts.">Moonlit Night</button>
+          <button type="button" class="edit-chip" data-e="Change the bride's dress to blush rose silk with gold trim.">Blush Dress</button>
+          <button type="button" class="edit-chip" data-e="Add a smooth carved jade dragon statue on a pedestal beside the plaza.">Add SDF Statue</button>
         </div>
-        <button id="btnApplyEdit" class="primary">Apply Localized Edit</button>
+        <button id="btnApplyEdit" class="primary">Apply Fast Streamed Edit</button>
         <div id="editStatus" class="status"></div>
       </div>
 
       <div class="card">
-        <div class="card-title">3. Appearance Fidelity Lab (WorldIR Authoritative)</div>
+        <div class="card-title">3. Region Expansion &amp; Appearance-Anchored Video</div>
         <div class="row">
-          <button id="btnEnhancePBR" title="Approach A: Add persistent roof tile & hill biome PBR + cavity AO + 3D SDF-AO">A: Upgrade PBR + SDF-AO</button>
+          <button id="btnExpandEast" title="Stream persistent adjacent 3D region at (+40, 0); revisit = 0 calls">+ Region East (1,0)</button>
+          <button id="btnExpandNorth" title="Stream persistent adjacent 3D region at (0, -40); revisit = 0 calls">+ Region North (0,-1)</button>
         </div>
         <div class="row">
-          <button id="btnBakeHero" title="Approach B: 1 Nano Banana call in object space -> permanent 360° dual-projected SDF detail">B: Bake 360° SDF Hero (1 Call)</button>
-        </div>
-        <div class="row">
-          <button id="btnNeuralStill" title="Approach C: Still-frame G-Buffer-conditioned Nano Banana render from current camera">C: G-Buffer Neural Still</button>
+          <button id="btnEnhancePBR" title="Approach A: Roof/hill PBR + cavity AO + SDF-AO">A: PBR+AO</button>
+          <button id="btnBakeHero" title="Approach B: 1-call 360° SDF object-space bake">B: Bake SDF</button>
+          <button id="btnNeuralStill" title="Approach C: G-Buffer Neural Still">C: Still</button>
         </div>
         <div id="fidelityStatus" class="status"></div>
       </div>
@@ -314,34 +326,45 @@
       </div>
     </aside>
 
-    <!-- CENTER: Interactive Full 3D WebGL2 Viewport -->
+    <!-- CENTER: Interactive Full 3D WebGL2 Viewport + Deterministic Timeline & Camera Tracks -->
     <main class="viewport-wrap">
       <canvas id="viewport3d"></canvas>
       <div class="vp-hud" id="vpHud">
-        <b>WorldIR 3D Viewport</b><br/>
-        Orbit: Left-drag rotate · Right-drag pan · Scroll zoom · Click object to select<br/>
-        Walk Mode (WASD): Press <b>F</b> or click Walk Mode · Mouse look · Space/Shift fly
+        <b>WorldIR 3D Studio</b><br/>
+        Orbit: Drag/Zoom/Click · Walk: <b>F</b> + WASD + Mouse · Non-blocking during stream
       </div>
-      <div class="vp-controls">
-        <button id="btnOrbitMode" class="active">Orbit Camera</button>
-        <button id="btnWalkMode">Walk Mode (WASD + Look)</button>
-        <button id="btnCamFront">Front</button>
-        <button id="btnCamBack">180° Back</button>
-        <button id="btnCamOverview">Aerial 3/4</button>
-        <button id="btnCamInspect" title="Orbit close around currently selected object">Inspect Selected</button>
-        <button id="btnRunAudit" class="primary">Run 4-View Hydrogen Audit</button>
+
+      <div class="vp-bottom">
+        <div class="vp-timeline">
+          <button id="btnPlayPause" class="active">Pause</button>
+          <input id="timeScrubber" type="range" min="0" max="12" step="0.02" value="0" />
+          <span id="timeLabel" class="mono" style="min-width:52px;">t=0.00s</span>
+          <select id="camTrackSelect" title="Switch independent camera trajectory without regenerating scene">
+            <option value="__free__">Camera: Free Interactive</option>
+          </select>
+        </div>
+        <div class="vp-controls">
+          <button id="btnOrbitMode" class="active">Orbit</button>
+          <button id="btnWalkMode">Walk (WASD)</button>
+          <button id="btnCamFront">Front</button>
+          <button id="btnCamBack">180° Back</button>
+          <button id="btnCamOverview">Aerial 3/4</button>
+          <button id="btnCamInspect">Inspect</button>
+          <button id="btnRunAudit" class="primary">4-View Hydrogen Audit</button>
+        </div>
       </div>
     </main>
 
-    <!-- RIGHT: Blender-Style Collection Outliner + Hydrogen 4-View Audit + Revision Ledger -->
+    <!-- RIGHT: Scene Collections Outliner + Hydrogen 4-View Audit + Revision Ledger -->
     <aside class="sidebar right">
       <div class="card">
         <div class="card-title">
-          <span>Scene Collections (Outliner)</span>
+          <span>Scene Collections &amp; Regions</span>
           <span id="objCountBadge" class="pill">0 objs</span>
         </div>
-        <div id="outliner" style="display:flex; flex-direction:column; gap:6px; max-height:250px; overflow-y:auto;">
-          <div style="color:var(--muted);">Compile a world to inspect collections &amp; carriers.</div>
+        <div id="regionsBar" class="wrap" style="margin-bottom:2px;"></div>
+        <div id="outliner" style="display:flex; flex-direction:column; gap:5px; max-height:240px; overflow-y:auto;">
+          <div style="color:var(--muted);">Stream a world to inspect live collections.</div>
         </div>
       </div>
 
@@ -350,8 +373,8 @@
           <span>Gemini 4 Hydrogen — 4-View 3D Audit</span>
           <span id="auditBadge" class="pill">--</span>
         </div>
-        <div id="auditBox" style="color:var(--muted); font-size:11.5px; line-height:1.4;">
-          Renders Overview, Front, Opposite 180° Back, and Close-Up angles from the live 3D scene for independent inspection.
+        <div id="auditBox" style="color:var(--muted); font-size:11px; line-height:1.4;">
+          Renders Overview, Front, Opposite 180° Back, and Close-Up angles from the live 3D scene.
         </div>
       </div>
 
@@ -360,16 +383,16 @@
         <div class="kpi-grid">
           <div class="kpi"><div class="v" style="color:var(--accent);" id="kpiCarbon">0</div><div class="k">G4 Carbon</div></div>
           <div class="kpi"><div class="v" style="color:var(--purple);" id="kpiHydrogen">0</div><div class="k">G4 Hydrogen</div></div>
-          <div class="kpi"><div class="v" style="color:var(--amber);" id="kpiNB">0</div><div class="k">NB PBR Tex</div></div>
-          <div class="kpi"><div class="v" style="color:var(--purple);" id="kpiSDF">0</div><div class="k">SDF Meshes</div></div>
+          <div class="kpi"><div class="v" style="color:var(--amber);" id="kpiNB">0</div><div class="k">NB PBR</div></div>
+          <div class="kpi"><div class="v" style="color:var(--purple);" id="kpiSDF">0</div><div class="k">SDF Mesh</div></div>
           <div class="kpi"><div class="v" style="color:var(--green);" id="kpiRev">0</div><div class="k">Revisions</div></div>
-          <div class="kpi"><div class="v" id="kpiPreserved">--</div><div class="k">Last Preserved</div></div>
+          <div class="kpi"><div class="v" id="kpiPreserved">--</div><div class="k">Preserved</div></div>
         </div>
       </div>
 
       <div class="card">
-        <div class="card-title">Persistent Edit History</div>
-        <div id="historyBox" style="display:flex; flex-direction:column; gap:6px;"></div>
+        <div class="card-title">Persistent Revision &amp; Latency History</div>
+        <div id="historyBox" style="display:flex; flex-direction:column; gap:5px;"></div>
       </div>
     </aside>
   </div>
@@ -380,7 +403,8 @@
         <span id="modalTitle" class="mono"></span>
         <button id="modalClose" style="flex:0;">Close</button>
       </div>
-      <img id="modalImg" />
+      <img id="modalImg" style="display:none;" />
+      <video id="modalVideo" controls autoplay loop muted style="display:none;"></video>
     </div>
   </div>
 
