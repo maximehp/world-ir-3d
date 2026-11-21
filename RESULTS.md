@@ -61,9 +61,32 @@ Prompt: *"A misty Nordic coastal harbor cove at golden hour with a tall red-and-
 
 ---
 
-## 3. Honest Technical Limitations
+## 3. Controlled Visual Fidelity Study (Approaches A, B, and C on Fixed World `w3d_bench_med`)
 
-1. **Stylized / architectural geometry rather than photogrammetry:** Parametric buildings/trees/vehicles and `52³` Marching Cubes SDF sculptures produce crisp, clean, 360°-walkable stylized 3D worlds with tactile Nano Banana PBR surfaces — not photorealistic scanned meshes or neural radiance fields.
-2. **SDF complexity ceiling:** Smooth-min SDF programs (`5–14` primitives) excel at statues, arches, monoliths, stylized animals, vessels, and organic landmarks, but struggle to represent ultra-fine articulated human faces, hands, or intricate machinery from scratch.
-3. **Compilation latency:** Initial world compilation currently takes ~60–110 s (driven primarily by Carbon's large JSON generation + 3 parallel Nano Banana texture syntheses), whereas localized behavior/atmosphere chat edits complete in `6–17 s` and Undo is instant (`0` calls).
-4. **Approximate collision & navigation:** Agents avoid static ground collisions via terrain heightfield sampling and target bounding-box radii rather than a full 3D navmesh or rigid-body physics engine.
+To separate geometry, persistent material/lighting quality, object-space neural detail, and view-dependent neural rendering without losing the authoritative World IR, we evaluated four configurations on the **exact same 22-object Mediterranean village (`w3d_bench_med`)** across identical locked camera angles (`Eye-Level Front`, `Elevated 3/4 Overview`, `Opposite 180° Back`, and `Hero Close-Up: marble_owl_statue`).
+
+### Root-Cause Audit of Baseline (`main` `226d618`) Limitations
+- **Geometry vs. Material Gap:** Flat untextured roofs, smooth stacked Play-Doh cypress ovals, opaque flat fountain water, green-tinted cobblestone outer hills, harsh 90° ground contact lines (no Contact AO), and washed-out white SDF marble without cavity shadowing.
+
+### Controlled Quantitative Comparison (`w3d_bench_med`, Retina `988×1608` Synchronized `gl.finish()`)
+
+| Approach | Where Neural Compute Runs | One-Time Cost | Per-Frame Render Time (`gl.finish()`) | Multi-View Consistency (Front / 3/4 / 180° Back) | Edit Locality & Camera Freedom |
+|---|---|---|---|---|---|
+| **0. Baseline (`main` `226d618`)** | 3 world-space PBR textures | ~38 s | ~15 ms/view (incl. JPEG readback) | **100% geometric** (stylized / flat roofs & trees) | Full 360° WASD & surgical edits |
+| **A. Persistent Multi-Channel PBR + SDF-AO + Atmospheric Lighting** | +2 persistent Nano Banana PBR sets (`roof_tiles_pbr`, `hill_terrain_pbr`) + cavity AO maps + 5-tap 3D SDF-AO (`32.5 ms`) | **23.9 s once** (`2` NB calls, cached forever) | **`4.63 ms` mean** (`4.6 ms` median, `215.9 FPS` sync GPU) | **100% consistent** across all 360° viewpoints; terracotta tile roofs, meadow hills splat, sparkling water ripples, organic cypress clusters, Contact AO | Full 360° WASD & surgical edits; 0 neural calls on camera/behavior changes |
+| **B. Approach A + Object-Space Dual-Projection Neural Baking (`marble_owl_statue`)** | **1 Nano Banana call ONCE in object space** on exact orthographic Front+Back SDF render -> normal-weighted `+Z/-Z` PBR shader + derived normal maps | **22.8 s once** (`1` NB call per hero SDF) | **`5.53 ms` mean** (`4.6 ms` median, `180.9 FPS` sync GPU) | **100% view-consistent Front & Back** (chiseled owl face/feathers in front, matching folded back wings behind, zero Janus flip, responds dynamically to sun/moon shadows) | **100% persistent** — moves, scales, and relights with the 3D object; 21/22 objects untouched |
+| **C. Geometry-Conditioned Neural Still Rendering (Experimental)** | Per-camera view-dependent Nano Banana pass conditioned on deterministic 3D G-Buffer (`Depth + World Normals + Object-ID`) + cross-view style ref | **~16–22 s per frame** (`1` NB call/frame) | **Not real-time** (~0.05 FPS) | **Dramatically photorealistic stills, but imperfect 3D consistency:** G-Buffer beat RGB-only on Front (`Edge F1: 0.9582 vs 0.9493`, `Obj-Silhouette Recall: 0.8475 vs 0.8282`), Overview reached `0.9317` Obj-Recall, Back 180° reached `0.8966` — **however Back 180° exhibited a Janus face-flip** (repainting the front owl face onto the back view!) | View-dependent image output; cannot replace World IR for free camera or temporal video |
+
+### Architectural Conclusion: Where Generative Computation Belongs
+1. **Persistent Object-Space & World-Space Generation (Approaches A + B) is the right authoritative backbone.** Spending neural compute **once** on multi-channel PBR surfaces (roofs, walls, dual-biome terrain, cavity AO) plus **1-call Object-Space Dual-Projection Baking** on `implicit_sdf` hero geometry converts stylized procedural geometry into richly carved, multi-view-consistent 3D assets rendered at **>180 FPS synchronized GPU throughput** with zero temporal flicker and full independent editability.
+2. **G-Buffer-Conditioned Neural Rendering (Approach C) belongs strictly as an optional, non-authoritative final still/cinema render pass.** Conditioning on deterministic Depth, Normals, and Object-ID masks measurably tightens geometric fidelity over RGB-only image-to-image, and starting from our upgraded Approach A+B render yields dramatic cinema-grade stills — while honestly revealing per-view latency and back-view Janus drift as open research limits.
+
+---
+
+## 4. Honest Technical Limitations & Next Research Questions
+
+1. **Dual-projection grazing seams (Approach B):** Front/Back (`+Z/-Z`) orthographic projection covers most sculptural statues cleanly, but extreme lateral grazing profiles (`|n_x| ≈ 1`) soften slightly — motivating a 4-view (`±Z, ±X`) or UV-atlas neural baking pass next.
+2. **Parametric building facade weathering:** Extending Approach B's object-space neural baking to architectural facades (orthographic elevation bake per building) would add bespoke plaster weathering, vines, and stained eaves at 60 FPS with 1 call per hero building.
+3. **SDF complexity ceiling:** Smooth-min SDF programs (`5–14` primitives) excel at statues, arches, monoliths, and stylized creatures, but do not replace rigged skeletal characters for close-up articulated humans.
+4. **Compilation latency:** Initial world compilation takes ~60–110 s (Carbon JSON + parallel Nano Banana textures), whereas localized behavior/atmosphere chat edits complete in `6–17 s`, persistent PBR enhancement takes `23.9 s` once, and Undo is instant (`0` calls).
+5. **View-dependent temporal video consistency (Approach C):** Extending G-Buffer-conditioned neural stills to temporally flicker-free moving video requires cross-frame optical-flow/3D-reprojection warping (deferred to future work rather than regenerating independent frames).

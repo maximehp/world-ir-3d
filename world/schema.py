@@ -19,14 +19,15 @@ from pydantic import BaseModel, Field
 # ---------------------------------------------------------------------------
 
 class MaterialSpec(BaseModel):
-    color: str = Field(default="#c8b8a2", description="Primary hex color")
-    secondary_color: str = Field(default="#6e4a38", description="Roof / trim / accent hex color")
-    accent_color: str = Field(default="#ffd584", description="Window glow / metal / foliage accent hex color")
+    color: str = Field(default="#b0b0b0", description="Primary hex color")
+    secondary_color: str = Field(default="#808080", description="Secondary surface hex color")
+    accent_color: str = Field(default="#cccccc", description="Detail hex color")
     roughness: float = Field(default=0.72, ge=0.05, le=1.0)
     metalness: float = Field(default=0.05, ge=0.0, le=1.0)
     emissive: str = Field(default="#000000", description="Optional emissive glow hex")
     emissive_intensity: float = Field(default=0.0, ge=0.0, le=3.0)
     texture_id: str | None = Field(default=None, description="ID of a Nano Banana generated seamless PBR texture")
+    roof_texture_id: str | None = Field(default=None, description="Optional PBR texture ID for roof tiles / secondary surfaces")
     texture_repeat: float = Field(default=2.0, ge=0.5, le=16.0)
 
 
@@ -36,6 +37,7 @@ class PBRTextureAsset(BaseModel):
     albedo_url: str
     normal_url: str
     roughness_url: str
+    ao_url: str | None = None
     source: Literal["nano_banana_pbr", "procedural"] = "nano_banana_pbr"
 
 
@@ -45,30 +47,31 @@ class PBRTextureAsset(BaseModel):
 
 class TerrainSpec(BaseModel):
     size: float = Field(default=72.0, ge=36.0, le=140.0)
-    style: Literal["cobblestone_plaza", "meadow_hills", "coastal_harbor", "snowy_valley", "desert_oasis", "forest_clearing"] = "cobblestone_plaza"
-    ground_color: str = "#8a8275"
-    hill_color: str = "#4f6d3f"
-    plaza_radius: float = Field(default=15.0, ge=4.0, le=32.0, description="Flat central village/courtyard radius in meters")
-    hill_height: float = Field(default=3.2, ge=0.0, le=12.0)
+    style: Literal["plain", "cobblestone_plaza", "meadow_hills", "coastal_harbor", "snowy_valley", "desert_oasis", "forest_clearing"] = "plain"
+    ground_color: str = "#858585"
+    hill_color: str = "#858585"
+    plaza_radius: float = Field(default=0.0, ge=0.0, le=32.0, description="Radius of an explicitly requested flat central area in meters; zero leaves the terrain unzoned")
+    hill_height: float = Field(default=0.0, ge=0.0, le=12.0)
     has_water: bool = False
     water_level: float = Field(default=-0.4, ge=-3.0, le=2.0)
     water_color: str = "#2a6f8f"
     texture_id: str | None = None
+    hill_texture_id: str | None = None
 
 
 class AtmosphereSpec(BaseModel):
-    time_of_day: Literal["morning", "noon", "golden_hour", "dusk", "night"] = "golden_hour"
-    sky_zenith: str = "#2b588f"
-    sky_horizon: str = "#f2b880"
-    sun_color: str = "#fff0d6"
-    sun_intensity: float = Field(default=2.8, ge=0.2, le=5.5)
-    sun_elevation_deg: float = Field(default=34.0, ge=5.0, le=82.0)
+    time_of_day: Literal["morning", "noon", "golden_hour", "dusk", "night"] = "noon"
+    sky_zenith: str = "#78a6ce"
+    sky_horizon: str = "#d8e4eb"
+    sun_color: str = "#ffffff"
+    sun_intensity: float = Field(default=2.8, ge=0.0, le=5.5)
+    sun_elevation_deg: float = Field(default=60.0, ge=5.0, le=82.0)
     sun_azimuth_deg: float = Field(default=42.0, ge=0.0, le=360.0)
-    fog_color: str = "#d8c4ae"
-    fog_density: float = Field(default=0.0085, ge=0.0, le=0.045)
-    ambient_intensity: float = Field(default=0.75, ge=0.15, le=2.0)
-    cloud_count: int = Field(default=9, ge=0, le=20)
-    wind_strength: float = Field(default=0.55, ge=0.0, le=2.0)
+    fog_color: str = "#d8e4eb"
+    fog_density: float = Field(default=0.0, ge=0.0, le=0.045)
+    ambient_intensity: float = Field(default=0.75, ge=0.0, le=2.0)
+    cloud_count: int = Field(default=0, ge=0, le=20)
+    wind_strength: float = Field(default=0.0, ge=0.0, le=2.0)
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +80,7 @@ class AtmosphereSpec(BaseModel):
 
 class ParametricSpec(BaseModel):
     kind: Literal[
+        "primitive",
         "building",
         "tower",
         "fountain",
@@ -92,13 +96,19 @@ class ParametricSpec(BaseModel):
         "scooter",
         "car",
         "boat",
+        "domed_hall",
+        "minaret",
+        "reflecting_pool",
+        "platform",
     ]
-    width: float = Field(default=4.5, ge=0.4, le=18.0)
+    shape: Literal["box", "sphere", "cylinder", "cone"] = Field(default="box", description="For kind='primitive', the base geometry scaled to width, height and depth")
+    width: float = Field(default=4.5, ge=0.4, le=48.0)
     height: float = Field(default=5.2, ge=0.4, le=24.0)
-    depth: float = Field(default=4.2, ge=0.4, le=18.0)
+    depth: float = Field(default=4.2, ge=0.4, le=48.0)
     floors: int = Field(default=2, ge=1, le=6)
     roof_style: Literal["gable", "hip", "cone", "dome", "flat"] = "gable"
     tree_style: Literal["oak", "pine", "cypress", "blossom", "palm"] = "oak"
+    dome_style: Literal["onion", "hemisphere"] = Field(default="onion", description="Dome profile for domed_hall / minaret chhatris")
     seed: int = Field(default=42, ge=1, le=9999)
     has_balcony: bool = False
     has_chimney: bool = False
@@ -122,13 +132,19 @@ class SDFPrimitive(BaseModel):
 
 class ImplicitSDFSpec(BaseModel):
     description: str
-    primitives: list[SDFPrimitive] = Field(..., min_length=2, max_length=16)
+    primitives: list[SDFPrimitive] = Field(..., min_length=1, max_length=16)
     resolution: int = Field(default=52, ge=36, le=64)
     target_height: float = Field(default=2.4, ge=0.4, le=12.0, description="Final world height in meters after normalizing mesh bottom to y=0")
     pedestal: bool = Field(default=False, description="Mount sculpture on a carved stone plinth")
     mesh_url: str | None = Field(default=None, description="Compiled Marching Cubes mesh JSON URL")
     vertex_count: int = 0
     face_count: int = 0
+    # Optional Approach B: Persistent Object-Space Dual-Projection Neural Baked Detail (1 call -> 360 deg @ 60 FPS)
+    baked_front_url: str | None = None
+    baked_back_url: str | None = None
+    baked_front_normal_url: str | None = None
+    baked_back_normal_url: str | None = None
+    baked_prompt: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -136,13 +152,13 @@ class ImplicitSDFSpec(BaseModel):
 # ---------------------------------------------------------------------------
 
 class ArticulatedAgentSpec(BaseModel):
-    rig_kind: Literal["bird_flock", "fox", "scooter_rider", "boat_cruiser", "floating_lanterns"] = "bird_flock"
-    count: int = Field(default=5, ge=1, le=14, description="Number of instances in flock/group (1 for single vehicle/creature)")
+    rig_kind: Literal["bird_flock", "fox", "scooter_rider", "car_driver", "boat_cruiser", "floating_lanterns"] = "bird_flock"
+    count: int = Field(default=1, ge=1, le=14, description="Number of instances in this group")
     entity_scale: float = Field(default=1.0, ge=0.3, le=3.0)
 
 
 class BehaviorSpec(BaseModel):
-    kind: Literal["none", "orbit_target", "orbit_and_perch", "patrol_ring", "patrol_waypoints", "sway_wind", "rotate_continuous", "bob_water"] = "none"
+    kind: Literal["none", "orbit_target", "orbit_and_perch", "patrol_ring", "patrol_waypoints", "sway_wind", "rotate_continuous", "bob_water", "follow_video_path"] = "none"
     target_id: str | None = Field(default=None, description="ID of another persistent 3D world object to orbit, perch on, or circle")
     orbit_radius: float = Field(default=6.0, ge=1.2, le=28.0)
     orbit_height: float = Field(default=5.5, ge=0.5, le=20.0)
@@ -150,6 +166,7 @@ class BehaviorSpec(BaseModel):
     perch_duration_sec: float = Field(default=3.5, ge=1.0, le=12.0)
     fly_duration_sec: float = Field(default=7.5, ge=2.0, le=20.0)
     waypoints_xz: list[list[float]] = Field(default_factory=list, description="Optional [[x,z], ...] loop for patrol_waypoints")
+    video_track_id: str | None = Field(default=None, description="For kind='follow_video_path': ID of a tracked moving object from the source video (e.g. 'traj_1') whose reconstructed 3D path this agent replays")
 
 
 # ---------------------------------------------------------------------------
@@ -157,9 +174,9 @@ class BehaviorSpec(BaseModel):
 # ---------------------------------------------------------------------------
 
 class WorldObject(BaseModel):
-    id: str = Field(..., description="Unique snake_case persistent ID, e.g. 'bell_tower', 'central_fountain', 'village_birds'")
+    id: str = Field(..., description="Unique snake_case persistent ID describing this object")
     name: str
-    collection: Literal["architecture", "landmarks", "nature", "vehicles", "agents", "props", "lighting"] = "architecture"
+    collection: Literal["architecture", "landmarks", "nature", "vehicles", "agents", "props", "lighting"] = "props"
     carrier: Literal["parametric_assembly", "implicit_sdf", "articulated_agent"]
     position: list[float] = Field(default=[0.0, 0.0, 0.0], min_length=3, max_length=3, description="World [x, y_offset, z] in meters; grounded to h(x,z)+y_offset")
     rotation_y_deg: float = Field(default=0.0, ge=-360.0, le=360.0)
@@ -219,6 +236,28 @@ class MultiViewAuditVerdict(BaseModel):
     multiview_plate_url: str | None = None
 
 
+ReferenceRole = Literal[
+    "site_or_floor_plan", "building_reference", "mood_board", "material_swatch", "object_reference", "scene_photo", "other"
+]
+
+
+class ReferenceUsage(BaseModel):
+    """How Carbon interpreted and integrated one user-supplied reference image."""
+    image_index: int = Field(..., ge=0, description="0-based index of the reference image in the order given")
+    role: ReferenceRole
+    how_used: str = Field(..., description="1-2 plain-English sentences explaining what was taken from the image and where it went in the world")
+    affected_object_ids: list[str] = Field(default_factory=list)
+
+
+class ReferenceImage(BaseModel):
+    url: str
+    filename: str
+    revision: int = 1
+    image_index: int = 0
+    role: ReferenceRole = "other"
+    how_used: str = ""
+
+
 class WorldRevision(BaseModel):
     revision: int
     action: str
@@ -230,6 +269,30 @@ class WorldRevision(BaseModel):
     costs: WorldCosts = Field(default_factory=WorldCosts)
     timings: WorldTimings = Field(default_factory=WorldTimings)
     audit: MultiViewAuditVerdict | None = None
+    reference_usage: list[ReferenceUsage] = Field(default_factory=list)
+
+
+class VideoTrack3D(BaseModel):
+    """A moving object tracked in the 2D source video, lifted into a timed 3D world-space path."""
+    id: str
+    label: str = "moving object"
+    region: Literal["sky", "ground", "water"] = "sky"
+    color: str = "#222222"
+    points: list[list[float]] = Field(default_factory=list, description="[[t_sec, x, y, z], ...] in world meters; y is absolute for sky tracks, ignored (terrain-snapped) for ground/water")
+
+
+class SourceVideo(BaseModel):
+    """The 2D video a world was reconstructed from, plus the matched camera and lifted 3D tracks."""
+    url: str
+    filename: str
+    duration: float
+    fps: float
+    width: int
+    height: int
+    fov_deg: float = 54.0
+    camera_pos: list[float] = Field(default=[0.0, 4.5, 22.0], min_length=3, max_length=3)
+    camera_look_at: list[float] = Field(default=[0.0, 2.5, 0.0], min_length=3, max_length=3)
+    tracks: list[VideoTrack3D] = Field(default_factory=list)
 
 
 class WorldState(BaseModel):
@@ -245,6 +308,9 @@ class WorldState(BaseModel):
     cumulative_costs: WorldCosts = Field(default_factory=WorldCosts)
     camera_spawn: list[float] = Field(default=[0.0, 3.2, 22.0], min_length=3, max_length=3)
     camera_look_at: list[float] = Field(default=[0.0, 2.5, 0.0], min_length=3, max_length=3)
+    source_video: SourceVideo | None = None
+    style_guide: str = Field(default="", description="Persistent art direction distilled from prompt + reference images (palette, materials, architecture, mood)")
+    reference_images: list[ReferenceImage] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -252,8 +318,9 @@ class WorldState(BaseModel):
 # ---------------------------------------------------------------------------
 
 class TextureRequest(BaseModel):
-    id: str = Field(..., description="Short snake_case texture id, e.g. 'sandstone_wall', 'cobblestone_ground'")
+    id: str = Field(..., description="Short snake_case texture ID describing the material")
     prompt: str = Field(..., description="Seamless tileable top-down PBR material texture prompt for Nano Banana")
+    reference_image_index: int | None = Field(default=None, description="If this material should be extracted from a user reference image (material swatch / mood board surface), its 0-based index; otherwise null")
 
 
 class CarbonWorldDraft(BaseModel):
@@ -261,10 +328,24 @@ class CarbonWorldDraft(BaseModel):
     summary: str
     terrain: TerrainSpec
     atmosphere: AtmosphereSpec
-    texture_requests: list[TextureRequest] = Field(default_factory=list, max_length=3, description="2-3 key seamless tileable PBR materials for Nano Banana")
-    objects: list[WorldObject] = Field(..., min_length=5, max_length=26)
+    texture_requests: list[TextureRequest] = Field(default_factory=list, max_length=3, description="Optional seamless PBR textures for surfaces that need them")
+    objects: list[WorldObject] = Field(..., description="Objects needed to represent the requested scene; may be empty")
     camera_spawn: list[float] = Field(default=[0.0, 3.5, 22.0], min_length=3, max_length=3)
     camera_look_at: list[float] = Field(default=[0.0, 2.5, 0.0], min_length=3, max_length=3)
+    style_guide: str = Field(default="", description="Concise art direction (palette hexes, materials, architecture rules, mood). Required when reference images are given")
+    reference_usage: list[ReferenceUsage] = Field(default_factory=list, description="One entry per reference image; empty if none were given")
+
+
+class VideoTrackBinding(BaseModel):
+    track_id: str = Field(..., description="Exact OpenCV track id from the video analysis, e.g. 'traj_1'")
+    agent_object_id: str = Field(..., description="ID of the articulated_agent object in `objects` that replays this track")
+    label: str = Field(..., description="What the moving thing is, e.g. 'white egret', 'red hatchback', 'jogger'")
+    region: Literal["sky", "ground", "water"] = Field(..., description="Whether it moves through the air, along the ground/road, or on water")
+
+
+class CarbonVideoWorldDraft(CarbonWorldDraft):
+    """WorldDraft reconstructed from a 2D video. camera_spawn/camera_look_at must approximate the ORIGINAL video camera."""
+    track_bindings: list[VideoTrackBinding] = Field(default_factory=list, max_length=12)
 
 
 class ObjectMutation(BaseModel):
@@ -297,6 +378,8 @@ class CarbonWorldEditPatch(BaseModel):
     remove_object_ids: list[str] = Field(default_factory=list)
     new_atmosphere: AtmosphereSpec | None = None
     new_terrain: TerrainSpec | None = None
+    reference_usage: list[ReferenceUsage] = Field(default_factory=list, description="One entry per reference image attached to this edit; empty if none")
+    new_style_guide: str | None = Field(default=None, description="Updated style guide if the edit (e.g. a new mood board) changes the world's art direction; else null")
 
 
 class Hydrogen3DAuditResponse(BaseModel):

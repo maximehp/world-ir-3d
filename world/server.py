@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pathlib
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -23,6 +24,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Video2Sim 3D (merged from the Harsh branch): video -> 3D simulation, served at /video2sim/
+from fastapi.responses import RedirectResponse  # noqa: E402
+
+from video2sim.backend.main import app as video2sim_app  # noqa: E402
+
+
+@app.get("/video2sim", include_in_schema=False)
+def video2sim_redirect():
+    return RedirectResponse("/video2sim/")
+
+
+app.mount("/video2sim", video2sim_app, name="video2sim")
+DEMO_DIR = pathlib.Path(__file__).resolve().parent.parent / "demo"
+DEMO_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/demo-assets", StaticFiles(directory=str(DEMO_DIR)), name="demo-assets")
 app.mount("/world-assets", StaticFiles(directory=str(DATA_ROOT)), name="world-assets")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -39,6 +55,22 @@ class EditWorldReq(BaseModel):
 class MultiViewAuditReq(BaseModel):
     plate_base64: str
     allow_repair: bool = True
+
+
+class BakeSDFReq(BaseModel):
+    front_b64: str
+    back_b64: str
+    style_hint: str | None = None
+
+
+class NeuralRenderReq(BaseModel):
+    tag: str = "view"
+    mode: str = "gbuffer_conditioned"
+    rgb_b64: str
+    depth_b64: str | None = None
+    normal_b64: str | None = None
+    obj_id_b64: str | None = None
+    style_ref_b64: str | None = None
 
 
 @app.get("/")
@@ -86,6 +118,101 @@ def create_world(req: CreateWorldReq):
         raise HTTPException(status_code=500, detail=f"World generation failed: {exc}")
 
 
+MAX_REF_IMAGES = 8
+MAX_REF_BYTES = 20 * 1024 * 1024
+
+
+async def _read_reference_images(images: list[UploadFile] | None) -> list[tuple[bytes, str]]:
+    out: list[tuple[bytes, str]] = []
+    for f in (images or [])[:MAX_REF_IMAGES]:
+        if f is None or not f.filename:
+            continue
+        if f.content_type and not f.content_type.startswith("image/"):
+            raise HTTPException(status_code=400, detail=f"'{f.filename}' is not an image")
+        data = await f.read()
+        if len(data) > MAX_REF_BYTES:
+            raise HTTPException(status_code=400, detail=f"'{f.filename}' is larger than 20 MB")
+        out.append((data, f.filename))
+    return out
+
+
+@app.post("/api/worlds/compose")
+async def compose_world(prompt: str = Form(default=""), images: list[UploadFile] = File(default=[])):
+    """Text prompt + reference images (floor/site plans, building photos, mood boards, swatches) -> 3D WorldIR."""
+    refs = await _read_reference_images(images)
+    if not prompt.strip() and not refs:
+        raise HTTPException(status_code=400, detail="Provide a prompt or at least one reference image")
+    try:
+        world = await run_in_threadpool(world_manager.create_world, prompt.strip(), refs)
+        return world.model_dump()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"World generation failed: {exc}")
+
+
+@app.post("/api/worlds/{world_id}/edit-with-images")
+async def edit_world_with_images(
+    world_id: str,
+    instruction: str = Form(default=""),
+    selected_object_id: str = Form(default=""),
+    images: list[UploadFile] = File(default=[]),
+):
+    refs = await _read_reference_images(images)
+    if not instruction.strip() and not refs:
+        raise HTTPException(status_code=400, detail="Provide an instruction or at least one reference image")
+    try:
+        world, delta = await run_in_threadpool(
+            world_manager.apply_edit, world_id, instruction.strip(), selected_object_id or None, refs
+        )
+        return {"world": world.model_dump(), "delta": delta}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"World edit failed: {exc}")
+
+
+VIDEO_SAMPLE = pathlib.Path(__file__).resolve().parent.parent / "video2sim" / "samples" / "sample_landscape_birds.mp4"
+
+
+@app.post("/api/worlds/from-video")
+async def create_world_from_video(
+    file: UploadFile | None = File(default=None),
+    use_sample: bool = Form(default=False),
+    hint: str = Form(default=""),
+    images: list[UploadFile] = File(default=[]),
+):
+    """2D video -> OpenCV tracking -> Gemini 4 Carbon reconstruction -> persistent 3D WorldIR with video-path agents."""
+    import shutil
+    import tempfile
+
+    refs = await _read_reference_images(images)
+    if use_sample:
+        if not VIDEO_SAMPLE.exists():
+            raise HTTPException(status_code=404, detail="Sample video not found")
+        src, filename, tmp = str(VIDEO_SAMPLE), VIDEO_SAMPLE.name, None
+    elif file is not None:
+        ext = pathlib.Path(file.filename or "upload.mp4").suffix.lower() or ".mp4"
+        if ext not in {".mp4", ".webm", ".mov", ".avi", ".mkv", ".m4v"}:
+            raise HTTPException(status_code=400, detail=f"Unsupported video format: {ext}")
+        tmp = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
+        with tmp:
+            shutil.copyfileobj(file.file, tmp)
+        src, filename = tmp.name, file.filename or f"upload{ext}"
+    else:
+        raise HTTPException(status_code=400, detail="Upload a video file or set use_sample=true")
+    try:
+        world = await run_in_threadpool(world_manager.create_world_from_video, src, filename, hint.strip(), refs)
+        return world.model_dump()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Video world reconstruction failed: {exc}")
+    finally:
+        if tmp is not None:
+            pathlib.Path(tmp.name).unlink(missing_ok=True)
+
+
 @app.post("/api/worlds/{world_id}/edit")
 def edit_world(world_id: str, req: EditWorldReq):
     if not req.instruction.strip():
@@ -125,3 +252,49 @@ def undo_world(world_id: str):
         return world.model_dump()
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+
+
+@app.post("/api/worlds/{world_id}/enhance-materials")
+def enhance_materials(world_id: str):
+    """Approach A: Upgrade persistent PBR textures (roofs, hill splat, cavity AO) + 3D SDF-AO."""
+    try:
+        world, info = world_manager.enhance_world_materials(world_id)
+        return {"world": world.model_dump(), "enhancement": info}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Material enhancement failed: {exc}")
+
+
+@app.post("/api/worlds/{world_id}/objects/{object_id}/bake-neural")
+def bake_object_neural(world_id: str, object_id: str, req: BakeSDFReq):
+    """Approach B: Spend 1 Nano Banana call in object space to bake persistent 360° dual-projected SDF detail."""
+    try:
+        world, info = world_manager.bake_sdf_object_neural(
+            world_id, object_id, req.front_b64, req.back_b64, style_hint=req.style_hint
+        )
+        return {"world": world.model_dump(), "bake": info}
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Neural object bake failed: {exc}")
+
+
+@app.post("/api/worlds/{world_id}/neural-render")
+def neural_render_still(world_id: str, req: NeuralRenderReq):
+    """Approach C: Experimental G-Buffer-conditioned neural still enhancement."""
+    try:
+        return world_manager.neural_render_view(
+            world_id=world_id,
+            tag=req.tag,
+            rgb_b64=req.rgb_b64,
+            mode=req.mode,
+            depth_b64=req.depth_b64,
+            normal_b64=req.normal_b64,
+            obj_id_b64=req.obj_id_b64,
+            style_ref_b64=req.style_ref_b64,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Neural render failed: {exc}")

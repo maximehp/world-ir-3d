@@ -1,11 +1,16 @@
 /* WorldIR 3D Studio — Full 3D Three.js WebGL2 Runtime:
- *  - Real PBR shadows (2048px PCFSoftShadowMap), live Sky Dome + PMREM Reflections, volumetric clouds
+ *  - Physically-based Rayleigh+Mie scattering sky, warm bounce fill, 2048px PCFSoftShadowMap, PMREM IBL
+ *  - Animated water ripples, dual-biome terrain splat, baked 3D SDF-AO, Object-Space Dual-Projection Neural Shader
  *  - Free WASD + Mouse Look walking/flying AND 360° Orbit + Click-to-Select object inspection
- *  - True surgical hot-patching: preserves live persistent objects & mid-flight agent trajectories
- *  - Automated 4-Viewpoint 3D render plate capture for independent Gemini 4 Hydrogen visual auditing
+ *  - Deterministic G-Buffer exporter (RGB, Linear Depth, World Normals, Object-ID) + Orthographic Object Capture
+ *  - Synchronized gl.finish() GPU profiler + Automated 4-Viewpoint Gemini 4 Hydrogen visual auditing
  */
 
 import * as THREE from "./vendor/three.module.min.js";
+import { EffectComposer } from "./vendor/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "./vendor/addons/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "./vendor/addons/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "./vendor/addons/postprocessing/OutputPass.js";
 import {
   buildArticulatedAgent,
   buildImplicitSDFObject,
@@ -15,7 +20,7 @@ import {
 } from "./builders.js";
 
 // ---------------------------------------------------------------------------
-// Three.js Renderer, Scene, Lights, Sky Dome & PMREM Environment
+// Three.js Renderer, Scene, Balanced Three-Point Lights, Atmospheric Sky & PMREM
 // ---------------------------------------------------------------------------
 const canvas = document.getElementById("viewport3d");
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
@@ -23,14 +28,21 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.08;
+renderer.toneMappingExposure = 1.04;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(54, 16 / 9, 0.15, 280);
+
+// Post-processing: HDR render -> selective-by-threshold bloom -> ACES tone map + sRGB output
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloomPass = new UnrealBloomPass(new THREE.Vector2(1024, 576), 0.3, 0.5, 0.9);
+composer.addPass(bloomPass);
+composer.addPass(new OutputPass());
 camera.position.set(0, 4.8, 22);
 
-// Sun + Hemisphere bounce light
+// Primary Sun / Moon directional shadow light
 const sunLight = new THREE.DirectionalLight("#fff0d6", 2.8);
 sunLight.castShadow = true;
 sunLight.shadow.mapSize.set(2048, 2048);
@@ -41,19 +53,25 @@ sunLight.shadow.camera.left = -shadowBound;
 sunLight.shadow.camera.right = shadowBound;
 sunLight.shadow.camera.top = shadowBound;
 sunLight.shadow.camera.bottom = -shadowBound;
-sunLight.shadow.bias = -0.0005;
-sunLight.shadow.normalBias = 0.025;
+sunLight.shadow.bias = -0.0004;
+sunLight.shadow.normalBias = 0.02;
 scene.add(sunLight);
 
-const hemiLight = new THREE.HemisphereLight("#8cb6e8", "#5b5142", 0.78);
+// Subtle warm back-bounce fill (simulates sunlit plaza wall GI bounce without washing shadows)
+const bounceLight = new THREE.DirectionalLight("#ffd4a3", 0.42);
+bounceLight.position.set(-28, 12, -26);
+scene.add(bounceLight);
+
+const hemiLight = new THREE.HemisphereLight("#8cb6e8", "#5b5142", 0.72);
 scene.add(hemiLight);
 
-// Procedural Sky Dome shader + dynamic PMREM environment generator for real reflections
+// Physically-Based Rayleigh + Mie Atmospheric Scattering Sky Dome
 const skyUniforms = {
-  uZenith: { value: new THREE.Color("#2b588f") },
-  uHorizon: { value: new THREE.Color("#f2b880") },
-  uSunDir: { value: new THREE.Vector3(0.5, 0.5, 0.5).normalize() },
-  uSunColor: { value: new THREE.Color("#fff0d6") },
+  uZenith: { value: new THREE.Color("#24528a") },
+  uHorizon: { value: new THREE.Color("#f2be88") },
+  uFogColor: { value: new THREE.Color("#dfc9ae") },
+  uSunDir: { value: new THREE.Vector3(0.5, 0.45, 0.5).normalize() },
+  uSunColor: { value: new THREE.Color("#ffeed2") },
 };
 const skyMat = new THREE.ShaderMaterial({
   side: THREE.BackSide,
@@ -70,57 +88,69 @@ const skyMat = new THREE.ShaderMaterial({
   fragmentShader: `
     uniform vec3 uZenith;
     uniform vec3 uHorizon;
+    uniform vec3 uFogColor;
     uniform vec3 uSunDir;
     uniform vec3 uSunColor;
     varying vec3 vWorldDir;
     void main() {
       vec3 d = normalize(vWorldDir);
       float h = clamp(d.y, 0.0, 1.0);
-      vec3 col = mix(uHorizon, uZenith, pow(h, 0.52));
-      float sunAmt = max(dot(d, normalize(uSunDir)), 0.0);
-      col += uSunColor * pow(sunAmt, 14.0) * 0.35;
-      col += uSunColor * smoothstep(0.997, 0.9994, sunAmt) * 1.6;
-      gl_FragColor = vec4(col, 1.0);
+      // Smooth Rayleigh gradient + soft aerial haze band along the horizon
+      vec3 sky = mix(uHorizon, uZenith, pow(h, 0.46));
+      float hazeBand = exp(-abs(d.y) * 9.0);
+      sky = mix(sky, mix(uHorizon, uFogColor, 0.55), hazeBand * 0.65);
+      // Forward Mie solar scattering halo + crisp sun disc
+      float sunCos = max(dot(d, normalize(uSunDir)), 0.0);
+      sky += uSunColor * pow(sunCos, 6.0) * 0.24 * (1.0 - h * 0.45);
+      sky += uSunColor * pow(sunCos, 48.0) * 0.48;
+      sky += uSunColor * smoothstep(0.9985, 0.9996, sunCos) * 1.9;
+      // Below horizon smoothly matches ground fog
+      sky = mix(uFogColor * 0.72, sky, smoothstep(-0.06, 0.03, d.y));
+      gl_FragColor = vec4(sky, 1.0);
     }
   `,
 });
-const skyDome = new THREE.Mesh(new THREE.SphereGeometry(170, 24, 16), skyMat);
+const skyDome = new THREE.Mesh(new THREE.SphereGeometry(175, 28, 18), skyMat);
 scene.add(skyDome);
 
 const pmremGen = new THREE.PMREMGenerator(renderer);
 let envRenderTarget = null;
 function refreshEnvironmentIBL() {
   const envScene = new THREE.Scene();
-  const envSky = new THREE.Mesh(new THREE.SphereGeometry(30, 16, 12), skyMat);
+  const envSky = new THREE.Mesh(new THREE.SphereGeometry(30, 18, 12), skyMat);
   envScene.add(envSky);
   if (envRenderTarget) envRenderTarget.dispose();
   envRenderTarget = pmremGen.fromScene(envScene, 0.04);
   scene.environment = envRenderTarget.texture;
 }
 
-// Drifting soft 3D cloud puffs
+// Soft layered atmospheric clouds (warmer lit underside during golden hour)
 const cloudGroup = new THREE.Group();
 scene.add(cloudGroup);
-function rebuildClouds(count, isNight) {
+function rebuildClouds(count, atm) {
   while (cloudGroup.children.length) cloudGroup.remove(cloudGroup.children[0]);
+  const isNight = atm.time_of_day === "night";
+  const cColor = new THREE.Color(isNight ? "#2a354d" : "#fff7ee").lerp(new THREE.Color(atm.sky_horizon || "#f2be88"), isNight ? 0.1 : 0.28);
   const cMat = new THREE.MeshStandardMaterial({
-    color: isNight ? "#33415c" : "#f7f3ee",
+    color: cColor,
     roughness: 1.0,
+    metalness: 0.0,
     transparent: true,
-    opacity: isNight ? 0.45 : 0.82,
+    opacity: isNight ? 0.35 : 0.68,
+    depthWrite: false,
   });
   for (let i = 0; i < count; i++) {
     const cg = new THREE.Group();
-    const ang = (i / Math.max(count, 1)) * Math.PI * 2 + 0.3;
-    const rad = 22 + (i % 4) * 12;
-    cg.position.set(Math.cos(ang) * rad, 19 + (i % 3) * 4.5, Math.sin(ang) * rad);
-    for (let k = 0; k < 4; k++) {
-      const puff = new THREE.Mesh(new THREE.SphereGeometry(1.6 + (k % 2) * 0.8, 10, 8), cMat);
-      puff.scale.set(1.5, 0.65, 1.15);
-      puff.position.set((k - 1.5) * 1.5, (k % 2) * 0.45, ((k * 7) % 3 - 1) * 0.8);
+    const ang = (i / Math.max(count, 1)) * Math.PI * 2 + 0.45;
+    const rad = 38 + (i % 4) * 16;
+    cg.position.set(Math.cos(ang) * rad, 30 + (i % 3) * 6.5, Math.sin(ang) * rad);
+    for (let k = 0; k < 6; k++) {
+      const puff = new THREE.Mesh(new THREE.IcosahedronGeometry(2.0 + (k % 3) * 0.85, 2), cMat);
+      puff.scale.set(1.65, 0.72, 1.25);
+      puff.position.set((k - 2.5) * 1.65, (k % 2) * 0.65, ((k * 5) % 3 - 1) * 1.15);
       cg.add(puff);
     }
-    cg.userData.driftSpeed = 0.25 + (i % 3) * 0.15;
+    cg.userData.driftSpeed = 0.22 + (i % 3) * 0.14;
     cloudGroup.add(cg);
   }
 }
@@ -144,26 +174,27 @@ scene.add(worldRoot);
 const state = {
   world: null,
   terrainGroup: null,
-  // Map<objectId, { spec, group, topY, radius }>
   runtimes: new Map(),
   selectedId: null,
-  camMode: "orbit", // "orbit" | "walk"
+  camMode: "orbit",
   busy: false,
-  // Orbit spherical state
   orbitTarget: new THREE.Vector3(0, 2.5, 0),
   orbitDist: 23,
   orbitTheta: 0.28,
   orbitPhi: 1.24,
-  // Walk / Free-fly Euler state
   walkYaw: 0,
   walkPitch: -0.06,
   keys: new Set(),
+  videoTime: 0,
+  refFiles: [],
+  ride: null,
 };
+const srcVideoEl = document.getElementById("srcVideo");
 
 function applyAtmosphere(atm) {
   const isNight = atm.time_of_day === "night" || atm.time_of_day === "dusk";
-  const el = THREE.MathUtils.degToRad(atm.sun_elevation_deg ?? 34);
-  const az = THREE.MathUtils.degToRad(atm.sun_azimuth_deg ?? 42);
+  const el = THREE.MathUtils.degToRad(atm.sun_elevation_deg ?? 32);
+  const az = THREE.MathUtils.degToRad(atm.sun_azimuth_deg ?? 46);
   const sunDir = new THREE.Vector3(
     Math.cos(el) * Math.sin(az),
     Math.sin(el),
@@ -171,35 +202,53 @@ function applyAtmosphere(atm) {
   ).normalize();
 
   sunLight.position.copy(sunDir).multiplyScalar(48);
-  sunLight.color.set(atm.sun_color || "#fff0d6");
-  sunLight.intensity = atm.sun_intensity ?? 2.8;
+  sunLight.color.set(atm.sun_color || "#ffeed2");
+  sunLight.intensity = atm.sun_intensity ?? 2.9;
+
+  bounceLight.position.copy(sunDir).multiplyScalar(-34);
+  bounceLight.position.y = Math.max(8, bounceLight.position.y);
+  bounceLight.color.set(isNight ? "#334c78" : (atm.sky_horizon || "#f2be88"));
+  bounceLight.intensity = isNight ? 0.28 : 0.48;
 
   hemiLight.color.set(atm.sky_zenith || "#6fa4e0");
-  hemiLight.groundColor.set(isNight ? "#1a1f2b" : "#615342");
-  hemiLight.intensity = atm.ambient_intensity ?? 0.75;
+  hemiLight.groundColor.set(isNight ? "#1a1f2b" : "#705d47");
+  hemiLight.intensity = (atm.ambient_intensity ?? 0.75) * 0.88;
 
-  skyUniforms.uZenith.value.set(atm.sky_zenith || "#2b588f");
-  skyUniforms.uHorizon.value.set(atm.sky_horizon || "#f2b880");
+  skyUniforms.uZenith.value.set(atm.sky_zenith || "#24528a");
+  skyUniforms.uHorizon.value.set(atm.sky_horizon || "#f2be88");
+  skyUniforms.uFogColor.value.set(atm.fog_color || "#dfc9ae");
   skyUniforms.uSunDir.value.copy(sunDir);
-  skyUniforms.uSunColor.value.set(atm.sun_color || "#fff0d6");
+  skyUniforms.uSunColor.value.set(atm.sun_color || "#ffeed2");
 
-  scene.fog = new THREE.FogExp2(atm.fog_color || "#d8c4ae", atm.fog_density ?? 0.008);
-  renderer.toneMappingExposure = isNight ? 1.18 : 1.06;
+  // Scale-aware fog: never hide more than ~25% of the hero subject at the camera's look distance
+  let fogDensity = atm.fog_density ?? 0.0075;
+  const w = state.world;
+  if (w?.camera_spawn && w?.camera_look_at) {
+    const lookDist = Math.hypot(...w.camera_spawn.map((v, i) => v - w.camera_look_at[i]));
+    fogDensity = Math.min(fogDensity, 0.536 / Math.max(lookDist, 12));
+  }
+  scene.fog = new THREE.FogExp2(atm.fog_color || "#dfc9ae", fogDensity);
+  renderer.toneMappingExposure = atm.time_of_day === "night" ? 1.15 : atm.time_of_day === "dusk" ? 1.0 : 0.96;
+  // Adaptive bloom: neon / lantern / window glow at night, a soft highlight bloom by day
+  const glowy = atm.time_of_day === "night" ? 1 : atm.time_of_day === "dusk" ? 0.7 : 0;
+  bloomPass.strength = 0.1 + 0.8 * glowy;
+  bloomPass.radius = 0.45 + 0.2 * glowy;
+  bloomPass.threshold = atm.time_of_day === "night" ? 0.72 : atm.time_of_day === "dusk" ? 0.86 : 0.92;
 
-  rebuildClouds(atm.cloud_count ?? 8, isNight);
+  rebuildClouds(atm.cloud_count ?? 8, atm);
   refreshEnvironmentIBL();
 
-  // Dynamically adjust existing building windows & lamppost lights without rebuilding geometry!
   for (const rt of state.runtimes.values()) {
     const g = rt.group;
     if (g.userData.windowGlassMat) {
-      g.userData.windowGlassMat.emissiveIntensity = isNight ? 1.9 : 0.42;
+      g.userData.windowGlassMat.emissiveIntensity = isNight ? 1.95 : 0.14;
+      g.userData.windowGlassMat.color.set(isNight ? "#5c4a32" : "#22303f");
     }
     if (g.userData.lampLight) {
-      g.userData.lampLight.intensity = isNight ? 18.0 : 3.5;
+      g.userData.lampLight.intensity = isNight ? 20.0 : 2.5;
     }
     if (g.userData.lampGlowMat) {
-      g.userData.lampGlowMat.emissiveIntensity = isNight ? 3.2 : 1.0;
+      g.userData.lampGlowMat.emissiveIntensity = isNight ? 3.2 : 0.75;
     }
   }
 }
@@ -208,7 +257,6 @@ function positionObjectOnTerrain(obj, group, terrain) {
   const [x, yOff, z] = obj.position || [0, 0, 0];
   const groundY = sampleTerrainHeight(terrain, x, z);
   if (obj.carrier === "articulated_agent" && (obj.agent?.rig_kind === "bird_flock" || obj.agent?.rig_kind === "floating_lanterns")) {
-    // Flock members manage their own world coordinates in world space
     group.position.set(0, 0, 0);
     group.rotation.set(0, 0, 0);
     group.scale.setScalar(1);
@@ -221,7 +269,10 @@ function positionObjectOnTerrain(obj, group, terrain) {
 
 function measureBounds(group) {
   group.updateMatrixWorld(true);
-  const box = new THREE.Box3().setFromObject(group);
+  const box = new THREE.Box3();
+  group.traverse(n => {
+    if (n.isMesh && !n.userData.isContactAO) box.expandByObject(n);
+  });
   const size = new THREE.Vector3();
   const center = new THREE.Vector3();
   box.getSize(size);
@@ -234,7 +285,6 @@ function measureBounds(group) {
 }
 
 async function mountSingleObject(obj, world) {
-  // Remove old instance for this ID ONLY if rebuilding this specific object
   if (state.runtimes.has(obj.id)) {
     const old = state.runtimes.get(obj.id);
     worldRoot.remove(old.group);
@@ -269,19 +319,19 @@ async function mountSingleObject(obj, world) {
 
 async function loadFullWorld(world, resetCam = true) {
   state.world = world;
-  // Clear previous world objects
   while (worldRoot.children.length) worldRoot.remove(worldRoot.children[0]);
   state.runtimes.clear();
   state.selectedId = null;
   selRing.visible = false;
 
-  // Build terrain + atmosphere
   state.terrainGroup = buildTerrain(world.terrain, world.textures || {});
   worldRoot.add(state.terrainGroup);
   applyAtmosphere(world.atmosphere);
 
-  // Mount all persistent objects concurrently (SDF meshes fetch in parallel)
   await Promise.all(world.objects.filter(o => o.visible).map(o => mountSingleObject(o, world)));
+
+  syncSourceVideo(world);
+  if (state.camMode === "ride") setCameraMode("orbit");
 
   if (resetCam) {
     const sp = world.camera_spawn || [0, 5, 22];
@@ -308,7 +358,6 @@ async function applySurgicalDelta(newWorld, delta) {
   const removed = new Set(delta.removed_ids || []);
   const objById = new Map(newWorld.objects.map(o => [o.id, o]));
 
-  // Remove deleted objects ONLY
   for (const rid of removed) {
     const rt = state.runtimes.get(rid);
     if (rt) {
@@ -318,13 +367,11 @@ async function applySurgicalDelta(newWorld, delta) {
     if (state.selectedId === rid) selectObject(null);
   }
 
-  // Hot-patch behavior-only objects IN-PLACE without destroying their live 3D instances!
   for (const bid of behOnly) {
     const rt = state.runtimes.get(bid);
     const updatedSpec = objById.get(bid);
     if (rt && updatedSpec) {
       rt.spec = updatedSpec;
-      // Nudge perched birds to take off smoothly toward their new target immediately!
       if (rt.group.userData.flockMembers) {
         for (const bird of rt.group.userData.flockMembers) {
           bird.userData.agentState.mode = "FLYING";
@@ -334,7 +381,6 @@ async function applySurgicalDelta(newWorld, delta) {
     }
   }
 
-  // Rebuild ONLY objects whose geometry/material/transform actually changed (unrelated objects stay bit-exact untouched!)
   const toRemount = [];
   for (const cid of changed) {
     if (behOnly.has(cid) || removed.has(cid)) continue;
@@ -345,7 +391,6 @@ async function applySurgicalDelta(newWorld, delta) {
   }
   await Promise.all(toRemount);
 
-  // Refresh selection ring if selected object moved/rescaled
   if (state.selectedId) selectObject(state.selectedId);
 
   const preservedCount = (delta.unchanged_object_ids || []).length;
@@ -363,14 +408,163 @@ async function applySurgicalDelta(newWorld, delta) {
 function resolveTargetBounds(targetId) {
   if (targetId && state.runtimes.has(targetId)) {
     const rt = state.runtimes.get(targetId);
-    return {
-      cx: rt.center.x,
-      cz: rt.center.z,
-      topY: rt.topY,
-      radius: rt.radius,
-    };
+    return { cx: rt.center.x, cz: rt.center.z, topY: rt.topY, radius: rt.radius };
   }
   return { cx: 0, cz: 0, topY: 3.2, radius: 3.0 };
+}
+
+// ---------------------------------------------------------------------------
+// Video-tracked agents: replay OpenCV trajectories lifted into 3D, synced to the source video
+// ---------------------------------------------------------------------------
+function sampleVideoTrack(track, vt) {
+  const pts = track.points;
+  if (!pts || !pts.length) return null;
+  if (vt < pts[0][0] - 0.05 || vt > pts[pts.length - 1][0] + 0.05) return null;
+  let lo = 0, hi = pts.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (pts[mid][0] <= vt) lo = mid; else hi = mid;
+  }
+  const a = pts[lo], b = pts[hi];
+  const k = THREE.MathUtils.clamp((vt - a[0]) / Math.max(b[0] - a[0], 1e-6), 0, 1);
+  return new THREE.Vector3(a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k, a[3] + (b[3] - a[3]) * k);
+}
+
+function updateVideoPathAgent(rt, dt, terrain) {
+  const sv = state.world?.source_video;
+  const trackId = rt.spec.behavior?.video_track_id;
+  const track = sv && trackId ? sv.tracks.find(x => x.id === trackId) : null;
+  if (!track) return false;
+  const vt = state.videoTime;
+  const g = rt.group;
+  const members = g.userData.flockMembers || g.userData.lanternMembers;
+
+  if (members) {
+    members.forEach((m, i) => {
+      const st = m.userData.agentState;
+      const p = sampleVideoTrack(track, vt - i * 0.12);
+      if (!p) { m.visible = false; return; }
+      if (i > 0) { p.x += (st.radiusOffset || 0) * 0.7; p.y += (st.heightOffset || 0) * 0.7; }
+      const prev = st.pos.clone();
+      if (!m.visible || prev.distanceTo(p) > 6) st.pos.copy(p); else st.pos.lerp(p, Math.min(1, dt * 12));
+      m.visible = true;
+      m.position.copy(st.pos);
+      const vel = st.pos.clone().sub(prev);
+      if (m.userData.wingL) {
+        if (vel.lengthSq() > 1e-6) m.lookAt(st.pos.clone().add(vel));
+        st.flapPhase = (st.flapPhase || 0) + dt * 10.5;
+        const flap = Math.sin(st.flapPhase) * 0.72;
+        m.userData.wingL.rotation.z = flap;
+        m.userData.wingR.rotation.z = -flap;
+      }
+    });
+    return true;
+  }
+
+  if (g.userData.patrolMesh) {
+    const p = sampleVideoTrack(track, vt);
+    if (!p) { g.visible = false; return true; }
+    const isBoat = rt.spec.agent?.rig_kind === "boat_cruiser" || track.region === "water";
+    p.y = isBoat ? (terrain.water_level ?? -0.4) + 0.05 : sampleTerrainHeight(terrain, p.x, p.z);
+    const prev = g.position.clone();
+    if (!g.visible || prev.distanceTo(p) > 6) g.position.copy(p); else g.position.lerp(p, Math.min(1, dt * 10));
+    g.visible = true;
+    const moveVec = g.position.clone().sub(prev);
+    const spd = moveVec.length() / Math.max(dt, 1e-4);
+    if (moveVec.lengthSq() > 1e-6) g.rotation.y = Math.atan2(-moveVec.z, moveVec.x);
+    const pm = g.userData.patrolMesh;
+    if (pm.userData.wheels) for (const w of pm.userData.wheels) w.rotation.z -= dt * spd * 1.8;
+    if (pm.userData.legs) for (const leg of pm.userData.legs) leg.rotation.z = Math.sin(performance.now() * 0.0085 + leg.userData.phase) * 0.48 * Math.min(1, spd);
+    return true;
+  }
+  return false;
+}
+
+function syncSourceVideo(world) {
+  const pip = document.getElementById("videoPip");
+  const camBtn = document.getElementById("btnCamVideo");
+  const sv = world?.source_video;
+  if (!sv) {
+    pip.hidden = true;
+    camBtn.hidden = true;
+    srcVideoEl.pause();
+    srcVideoEl.removeAttribute("src");
+    srcVideoEl.load();
+    return;
+  }
+  pip.hidden = false;
+  camBtn.hidden = false;
+  document.getElementById("pipTitle").textContent = `${sv.filename} · synced to 3D`;
+  if (!srcVideoEl.src.endsWith(sv.url)) {
+    srcVideoEl.src = sv.url;
+    srcVideoEl.play().catch(() => {});
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Reference images tray (plans, mood boards, photos, swatches) shared by Compile / Video / Edit
+// ---------------------------------------------------------------------------
+const MAX_REFS = 8;
+function renderRefTray() {
+  const box = document.getElementById("refThumbs");
+  box.innerHTML = "";
+  state.refFiles.forEach((f, i) => {
+    const el = document.createElement("div");
+    el.className = "ref-thumb";
+    el.title = f.name;
+    const img = document.createElement("img");
+    img.src = f._url || (f._url = URL.createObjectURL(f));
+    const x = document.createElement("button");
+    x.type = "button";
+    x.textContent = "×";
+    x.onclick = e => {
+      e.preventDefault();
+      URL.revokeObjectURL(f._url);
+      state.refFiles.splice(i, 1);
+      renderRefTray();
+    };
+    el.append(img, x);
+    box.appendChild(el);
+  });
+  document.getElementById("refCount").textContent = `${state.refFiles.length} / ${MAX_REFS}`;
+}
+function addRefFiles(files) {
+  for (const f of files) {
+    if (!f.type.startsWith("image/") || state.refFiles.length >= MAX_REFS) continue;
+    state.refFiles.push(f);
+  }
+  renderRefTray();
+}
+function clearRefFiles() {
+  state.refFiles.forEach(f => f._url && URL.revokeObjectURL(f._url));
+  state.refFiles = [];
+  renderRefTray();
+}
+function appendRefs(form) {
+  state.refFiles.forEach(f => form.append("images", f, f.name || "pasted.png"));
+}
+(() => {
+  const drop = document.getElementById("refDrop");
+  const input = document.getElementById("refFiles");
+  input.onchange = () => { addRefFiles(input.files); input.value = ""; };
+  ["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
+  ["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
+  drop.addEventListener("drop", e => addRefFiles(e.dataTransfer.files));
+  window.addEventListener("paste", e => {
+    const imgs = [...(e.clipboardData?.items || [])].filter(it => it.type.startsWith("image/")).map(it => it.getAsFile()).filter(Boolean);
+    if (imgs.length) { e.preventDefault(); addRefFiles(imgs); }
+  });
+})();
+
+function renderRefUsage(w, rev) {
+  if (!rev.reference_usage?.length) return "";
+  const imgs = w.reference_images || [];
+  return `<div style="margin-top:6px;"><b style="font-size:11px;">Reference images used:</b>` + rev.reference_usage.map(u => {
+    const ri = imgs.find(r => r.revision === rev.revision && r.image_index === u.image_index);
+    const role = u.role.replace(/_/g, " ");
+    return `<div class="ref-usage">${ri ? `<a href="${ri.url}" target="_blank"><img src="${ri.url}" alt=""/></a>` : ""}
+      <div><div class="ref-role">#${u.image_index} · ${role}</div><div style="font-size:11px;">${u.how_used}</div></div></div>`;
+  }).join("") + `</div>`;
 }
 
 function updateAutonomousWorld(t, dt) {
@@ -378,51 +572,51 @@ function updateAutonomousWorld(t, dt) {
   const wind = state.world.atmosphere?.wind_strength ?? 0.5;
   const terrain = state.world.terrain;
 
-  // Drift clouds
   for (const cg of cloudGroup.children) {
     cg.position.x += cg.userData.driftSpeed * wind * dt;
-    if (cg.position.x > 65) cg.position.x = -65;
+    if (cg.position.x > 70) cg.position.x = -70;
   }
 
-  // Animate reflective water ripple shimmer
+  // Scroll bay/terrain water ripples
   const wm = state.terrainGroup?.userData?.waterMesh;
-  if (wm) {
-    wm.position.y = (terrain.water_level ?? -0.4) + Math.sin(t * 1.4) * 0.035;
+  const wnt = state.terrainGroup?.userData?.waterNormalTex;
+  if (wm) wm.position.y = (terrain.water_level ?? -0.4) + Math.sin(t * 1.4) * 0.03;
+  if (wnt) {
+    wnt.offset.x = (t * 0.045) % 1.0;
+    wnt.offset.y = (t * 0.032) % 1.0;
   }
 
   for (const rt of state.runtimes.values()) {
     const { spec, group } = rt;
+    if (spec.behavior?.kind === "follow_video_path" && updateVideoPathAgent(rt, dt, terrain)) continue;
 
-    // 1. Fountain parabolic 3D water jets
+    if (group.userData.waterNormalTex) {
+      group.userData.waterNormalTex.offset.x = (t * 0.09) % 1.0;
+      group.userData.waterNormalTex.offset.y = (-t * 0.06) % 1.0;
+    }
+
     if (group.userData.waterDrops) {
       for (const drop of group.userData.waterDrops) {
         const d = drop.userData;
         const u = (d.phase + t * 0.85) % 1.0;
         const r = u * d.radius;
         const arcY = d.topY + 0.95 * u - (0.95 + (d.topY - d.poolY)) * u * u;
-        drop.position.set(Math.cos(d.ang) * r, Math.max(d.poolY, arcY), Math.sin(d.ang) * r);
+        drop.position.set((d.ox || 0) + Math.cos(d.ang) * r, Math.max(d.poolY, arcY), (d.oz || 0) + Math.sin(d.ang) * r);
       }
     }
 
-    // 2. Tree wind sway
     if (group.userData.swayGroup) {
       const ph = group.userData.swayPhase || 0;
-      group.userData.swayGroup.rotation.z = Math.sin(t * 1.3 + ph) * 0.035 * wind;
-      group.userData.swayGroup.rotation.x = Math.cos(t * 0.95 + ph) * 0.022 * wind;
+      group.userData.swayGroup.rotation.z = Math.sin(t * 1.3 + ph) * 0.032 * wind;
+      group.userData.swayGroup.rotation.x = Math.cos(t * 0.95 + ph) * 0.02 * wind;
     }
 
-    // 3. Windmill sails, Lighthouse beam, Clock hands
-    if (group.userData.spinRotorZ) {
-      group.userData.spinRotorZ.rotation.z -= dt * (0.65 + wind * 0.6);
-    }
-    if (group.userData.sweepBeamY) {
-      group.userData.sweepBeamY.rotation.y += dt * 0.75;
-    }
+    if (group.userData.spinRotorZ) group.userData.spinRotorZ.rotation.z -= dt * (0.65 + wind * 0.6);
+    if (group.userData.sweepBeamY) group.userData.sweepBeamY.rotation.y += dt * 0.75;
     if (group.userData.clockHands) {
       for (const hand of group.userData.clockHands) hand.rotation.z = -t * 0.25;
     }
 
-    // 4. Autonomous Flock of Flapping & Perching 3D Birds!
     if (group.userData.flockMembers) {
       const beh = spec.behavior || {};
       const tgt = resolveTargetBounds(beh.target_id);
@@ -436,14 +630,10 @@ function updateAutonomousWorld(t, dt) {
       for (const bird of group.userData.flockMembers) {
         const st = bird.userData.agentState;
         st.timer += dt;
-
-        // State transitions between circling and perching on target's real 3D roof/rim!
         if (canPerch && st.mode === "FLYING" && st.timer > flyDur) {
-          st.mode = "LANDING";
-          st.timer = 0;
+          st.mode = "LANDING"; st.timer = 0;
         } else if (st.mode === "PERCHED" && st.timer > perchDur) {
-          st.mode = "FLYING";
-          st.timer = 0;
+          st.mode = "FLYING"; st.timer = 0;
         }
 
         const slotAng = (st.perchSlot * 2.1) % (Math.PI * 2);
@@ -458,7 +648,6 @@ function updateAutonomousWorld(t, dt) {
         if (st.mode === "PERCHED") {
           st.pos.lerp(perchPos, Math.min(1, dt * 6));
           bird.position.copy(st.pos);
-          // Fold wings calmly while perched on roof/fountain rim
           bird.userData.wingL.rotation.z = THREE.MathUtils.lerp(bird.userData.wingL.rotation.z, -1.1, dt * 5);
           bird.userData.wingR.rotation.z = THREE.MathUtils.lerp(bird.userData.wingR.rotation.z, 1.1, dt * 5);
           bird.rotation.z = THREE.MathUtils.lerp(bird.rotation.z, 0, dt * 5);
@@ -467,23 +656,14 @@ function updateAutonomousWorld(t, dt) {
           continue;
         } else if (st.mode === "LANDING") {
           desiredPos = perchPos;
-          if (st.pos.distanceTo(perchPos) < 0.35) {
-            st.mode = "PERCHED";
-            st.timer = 0;
-          }
+          if (st.pos.distanceTo(perchPos) < 0.35) { st.mode = "PERCHED"; st.timer = 0; }
         } else {
-          // Smooth 3D circling orbit around target (disappearing behind buildings and emerging!)
           st.angle += dt * speed * (0.85 + 0.2 * Math.sin(st.perchSlot));
           const rNow = orbitR + st.radiusOffset;
           const yNow = orbitH + st.heightOffset + Math.sin(st.angle * 2.0 + st.perchSlot) * 0.75;
-          desiredPos = new THREE.Vector3(
-            tgt.cx + Math.cos(st.angle) * rNow,
-            yNow,
-            tgt.cz + Math.sin(st.angle) * rNow
-          );
+          desiredPos = new THREE.Vector3(tgt.cx + Math.cos(st.angle) * rNow, yNow, tgt.cz + Math.sin(st.angle) * rNow);
         }
 
-        // Smooth steering force so mid-flight target switches ("circle the fountain instead!") glide naturally!
         const toTarget = desiredPos.clone().sub(st.pos);
         const dist = toTarget.length();
         const maxSpeed = st.mode === "LANDING" ? 4.5 : Math.max(4.5, orbitR * speed * 1.25);
@@ -492,15 +672,11 @@ function updateAutonomousWorld(t, dt) {
         st.pos.addScaledVector(st.vel, dt);
         bird.position.copy(st.pos);
 
-        // Face velocity direction + bank realistically into turns
         if (st.vel.lengthSq() > 0.01) {
-          const lookPt = st.pos.clone().add(st.vel);
-          bird.lookAt(lookPt);
-          const bank = st.mode === "FLYING" ? -0.32 : 0.0;
-          bird.rotation.z = THREE.MathUtils.lerp(bird.rotation.z, bank, dt * 4);
+          bird.lookAt(st.pos.clone().add(st.vel));
+          bird.rotation.z = THREE.MathUtils.lerp(bird.rotation.z, st.mode === "FLYING" ? -0.32 : 0.0, dt * 4);
         }
 
-        // Hinged 3D wing flapping
         st.flapPhase += dt * (st.mode === "LANDING" ? 15.0 : 10.5);
         const flap = Math.sin(st.flapPhase) * 0.72;
         bird.userData.wingL.rotation.z = flap;
@@ -508,7 +684,6 @@ function updateAutonomousWorld(t, dt) {
       }
     }
 
-    // 5. Drifting Floating Lanterns
     if (group.userData.lanternMembers) {
       const beh = spec.behavior || {};
       const tgt = resolveTargetBounds(beh.target_id);
@@ -528,7 +703,6 @@ function updateAutonomousWorld(t, dt) {
       }
     }
 
-    // 6. Ground Patrolling Agent (Scooter / Fox / Boat) following h(x, z) terrain!
     if (group.userData.patrolMesh) {
       const beh = spec.behavior || {};
       const tgt = resolveTargetBounds(beh.target_id);
@@ -546,21 +720,236 @@ function updateAutonomousWorld(t, dt) {
       group.position.lerp(new THREE.Vector3(nx, ny, nz), Math.min(1, dt * 5.0));
       const moveVec = group.position.clone().sub(prevPos);
       if (moveVec.lengthSq() > 1e-6) {
-        // Vehicle/fox forward axis is +X -> atan2(-dz, dx)
-        const targetYaw = Math.atan2(-moveVec.z, moveVec.x);
-        group.rotation.y = targetYaw;
+        group.rotation.y = Math.atan2(-moveVec.z, moveVec.x);
       }
-      // Spin wheels or trot legs!
       if (pm.userData.wheels) {
         for (const w of pm.userData.wheels) w.rotation.z -= dt * spd * rad * 1.8;
       }
       if (pm.userData.legs) {
-        for (const leg of pm.userData.legs) {
-          leg.rotation.z = Math.sin(t * 8.5 + leg.userData.phase) * 0.48;
-        }
+        for (const leg of pm.userData.legs) leg.rotation.z = Math.sin(t * 8.5 + leg.userData.phase) * 0.48;
       }
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Deterministic G-Buffer Exporter (Approach C) + Ortho Front/Back Capture (Approach B)
+// + Synchronized gl.finish() GPU Frame Profiler
+// ---------------------------------------------------------------------------
+const linearDepthMat = new THREE.ShaderMaterial({
+  uniforms: { uNear: { value: 0.5 }, uFar: { value: 65.0 } },
+  vertexShader: `
+    varying float vViewZ;
+    void main() {
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      vViewZ = -mv.z;
+      gl_Position = projectionMatrix * mv;
+    }
+  `,
+  fragmentShader: `
+    uniform float uNear;
+    uniform float uFar;
+    varying float vViewZ;
+    void main() {
+      float d = clamp((vViewZ - uNear) / (uFar - uNear), 0.0, 1.0);
+      float inv = 1.0 - pow(d, 0.65);
+      gl_FragColor = vec4(vec3(inv), 1.0);
+    }
+  `,
+});
+
+const normalPassMat = new THREE.MeshNormalMaterial();
+
+function hashIdToColor(idStr) {
+  let h = 2166136261;
+  for (let i = 0; i < idStr.length; i++) {
+    h ^= idStr.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  const r = 45 + ((h >>> 0) % 195);
+  const g = 45 + ((h >>> 8) % 195);
+  const b = 45 + ((h >>> 16) % 195);
+  return new THREE.Color(r / 255, g / 255, b / 255);
+}
+
+function captureGBufferPasses(posArr = null, lookArr = null, outW = 768, outH = 480) {
+  const prevPos = camera.position.clone();
+  const prevQuat = camera.quaternion.clone();
+  const prevAspect = camera.aspect;
+  const prevSelVis = selRing.visible;
+  const prevSkyVis = skyDome.visible;
+  const prevCloudVis = cloudGroup.visible;
+  const prevFog = scene.fog;
+  const prevBg = scene.background;
+  const prevTone = renderer.toneMapping;
+
+  selRing.visible = false;
+  if (posArr && lookArr) {
+    camera.position.set(posArr[0], posArr[1], posArr[2]);
+    camera.lookAt(lookArr[0], lookArr[1], lookArr[2]);
+  }
+  camera.aspect = outW / outH;
+  camera.updateProjectionMatrix();
+
+  const tmp = document.createElement("canvas");
+  tmp.width = outW;
+  tmp.height = outH;
+  const ctx = tmp.getContext("2d");
+
+  function snap(quality = 0.92) {
+    renderer.render(scene, camera);
+    ctx.drawImage(canvas, 0, 0, canvas.width, canvas.height, 0, 0, outW, outH);
+    return tmp.toDataURL("image/jpeg", quality);
+  }
+
+  // 1. Beauty RGB pass
+  const rgb = snap(0.92);
+
+  // Hide sky, clouds, fog, and contact-AO planes for pure geometric G-Buffer passes
+  skyDome.visible = false;
+  cloudGroup.visible = false;
+  scene.fog = null;
+  renderer.toneMapping = THREE.NoToneMapping;
+
+  const hiddenAO = [];
+  worldRoot.traverse(n => {
+    if (n.userData.isContactAO && n.visible) { n.visible = false; hiddenAO.push(n); }
+  });
+
+  // 2. Linear Depth pass
+  scene.background = new THREE.Color("#000000");
+  scene.overrideMaterial = linearDepthMat;
+  const depth = snap(0.90);
+
+  // 3. Surface Normals pass
+  scene.background = new THREE.Color("#8080ff");
+  scene.overrideMaterial = normalPassMat;
+  const normals = snap(0.90);
+  scene.overrideMaterial = null;
+
+  // 4. Deterministic Object-ID Segmentation pass
+  scene.background = new THREE.Color("#10141c");
+  const savedMats = [];
+  const idMatCache = new Map();
+  worldRoot.traverse(n => {
+    if (n.isMesh && n.visible) {
+      const oid = n.userData.objectId || "__terrain__";
+      if (!idMatCache.has(oid)) {
+        idMatCache.set(oid, new THREE.MeshBasicMaterial({ color: oid === "__terrain__" ? new THREE.Color("#2b323d") : hashIdToColor(oid) }));
+      }
+      savedMats.push([n, n.material]);
+      n.material = idMatCache.get(oid);
+    }
+  });
+  const obj_id = snap(0.92);
+
+  // Restore scene completely
+  for (const [n, m] of savedMats) n.material = m;
+  for (const m of idMatCache.values()) m.dispose();
+  for (const ao of hiddenAO) ao.visible = true;
+  scene.background = prevBg;
+  scene.fog = prevFog;
+  skyDome.visible = prevSkyVis;
+  cloudGroup.visible = prevCloudVis;
+  renderer.toneMapping = prevTone;
+  camera.aspect = prevAspect;
+  camera.updateProjectionMatrix();
+  camera.position.copy(prevPos);
+  camera.quaternion.copy(prevQuat);
+  selRing.visible = prevSelVis;
+  renderer.render(scene, camera);
+
+  return { rgb, depth, normals, obj_id };
+}
+
+function captureObjectOrthoFrontBack(objectId) {
+  const rt = state.runtimes.get(objectId);
+  if (!rt) throw new Error(`Object ${objectId} not found in live scene`);
+
+  let heroMesh = null;
+  rt.group.traverse(n => { if (n.userData.isSDFHeroMesh) heroMesh = n; });
+  if (!heroMesh) throw new Error(`Object ${objectId} has no implicit_sdf mesh`);
+
+  // Build isolated studio scene containing ONLY a clone of the SDF mesh with neutral white+SDF-AO shading
+  const isoScene = new THREE.Scene();
+  isoScene.background = new THREE.Color(120 / 255, 124 / 255, 130 / 255);
+  const amb = new THREE.AmbientLight("#ffffff", 1.15);
+  const key = new THREE.DirectionalLight("#ffffff", 0.95);
+  key.position.set(1.5, 2.5, 3.0);
+  const fill = new THREE.DirectionalLight("#e6eef8", 0.85);
+  fill.position.set(-1.5, 1.5, -3.0);
+  isoScene.add(amb, key, fill);
+
+  const hasVC = Boolean(heroMesh.geometry.attributes.color);
+  const clayMat = new THREE.MeshStandardMaterial({
+    color: "#e8e3da",
+    roughness: 0.65,
+    metalness: 0.05,
+    vertexColors: hasVC,
+  });
+  const clone = new THREE.Mesh(heroMesh.geometry, clayMat);
+  isoScene.add(clone);
+
+  const pb = heroMesh.userData.sdfProjBounds || { cx: 0, cy: 1.1, span: 2.6 };
+  const half = pb.span * 0.5;
+  const orthoCam = new THREE.OrthographicCamera(-half, half, half, -half, 0.1, 30);
+
+  const prevW = canvas.width, prevH = canvas.height;
+  const prevTone = renderer.toneMapping;
+  renderer.toneMapping = THREE.NoToneMapping;
+
+  const outCanvas = document.createElement("canvas");
+  outCanvas.width = 512;
+  outCanvas.height = 512;
+  const ctx = outCanvas.getContext("2d");
+
+  // Render square into current renderer viewport centered
+  renderer.setSize(512, 512, false);
+
+  // Front (+Z looking toward origin)
+  orthoCam.position.set(pb.cx, pb.cy, 8.0);
+  orthoCam.lookAt(pb.cx, pb.cy, 0);
+  renderer.render(isoScene, orthoCam);
+  ctx.drawImage(canvas, 0, 0, 512, 512);
+  const front_b64 = outCanvas.toDataURL("image/png");
+
+  // Back (-Z looking toward origin)
+  orthoCam.position.set(pb.cx, pb.cy, -8.0);
+  orthoCam.lookAt(pb.cx, pb.cy, 0);
+  renderer.render(isoScene, orthoCam);
+  ctx.drawImage(canvas, 0, 0, 512, 512);
+  const back_b64 = outCanvas.toDataURL("image/png");
+
+  clayMat.dispose();
+  renderer.toneMapping = prevTone;
+  resize();
+  renderer.render(scene, camera);
+  return { front_b64, back_b64, bounds: pb };
+}
+
+function measureSyncGpuFrameMs(numFrames = 24) {
+  const gl = renderer.getContext();
+  // Warmup
+  renderer.render(scene, camera);
+  gl.finish();
+  const samples = [];
+  for (let i = 0; i < numFrames; i++) {
+    const t0 = performance.now();
+    renderer.render(scene, camera);
+    gl.finish();
+    samples.push(performance.now() - t0);
+  }
+  samples.sort((a, b) => a - b);
+  const mean = samples.reduce((a, b) => a + b, 0) / samples.length;
+  return {
+    frames: numFrames,
+    resolution: [canvas.width, canvas.height],
+    min_ms: Number(samples[0].toFixed(3)),
+    median_ms: Number(samples[Math.floor(samples.length / 2)].toFixed(3)),
+    mean_ms: Number(mean.toFixed(3)),
+    p95_ms: Number(samples[Math.min(samples.length - 1, Math.floor(samples.length * 0.95))].toFixed(3)),
+    effective_fps: Number((1000 / Math.max(mean, 0.01)).toFixed(1)),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -585,17 +974,186 @@ function setOrbitFromLook(pos, target) {
   updateOrbitCamera();
 }
 
+// ---------------------------------------------------------------------------
+// Ride Along: chase / first-person camera attached to any moving agent
+// (birds, foxes, scooters, cars, boats, lanterns, including video-tracked paths)
+// ---------------------------------------------------------------------------
+const BASE_FOV = 54;
+const RIDE_PROFILES = {
+  bird_flock:        { chase: [3.4, 1.0], eye: 0.12, fwdEye: 0.45, fov: [66, 78] },
+  floating_lanterns: { chase: [3.8, 1.2], eye: 0.2, fwdEye: 0.5, fov: [62, 74] },
+  fox:               { chase: [3.6, 1.5], eye: 0.55, fwdEye: 0.7, fov: [62, 76] },
+  scooter_rider:     { chase: [3.9, 1.6], eye: 1.35, fwdEye: 0.2, fov: [62, 76] },
+  car_driver:        { chase: [5.4, 2.0], eye: 1.25, fwdEye: 0.3, fov: [60, 74] },
+  boat_cruiser:      { chase: [7.5, 3.0], eye: 1.7, fwdEye: 0.4, fov: [60, 72] },
+};
+
+function rideableAgents() {
+  return [...state.runtimes.values()].filter(rt => rt.spec.carrier === "articulated_agent" && rt.spec.visible !== false);
+}
+
+// Returns {pos} of the agent's lead body (first visible flock member / vehicle), or null if not currently on screen
+function rideSubjectPosition(rt) {
+  const g = rt.group;
+  const members = g.userData.flockMembers || g.userData.lanternMembers;
+  const out = new THREE.Vector3();
+  if (members) {
+    const r = state.ride;
+    let m = members[r.memberIdx % members.length];
+    if (!m || !m.visible) {
+      const idx = members.findIndex(x => x.visible);
+      if (idx < 0) return null;
+      r.memberIdx = idx;
+      m = members[idx];
+    }
+    state.ride.body = m;
+    return m.getWorldPosition(out);
+  }
+  if (!g.visible) return null;
+  state.ride.body = g;
+  return g.getWorldPosition(out);
+}
+
+// First-person: hide the rider's own body from the camera (layer 1 is never rendered)
+function setRideBodyHidden(obj) {
+  const r = state.ride;
+  if (r && r.hiddenBody && r.hiddenBody !== obj) {
+    r.hiddenBody.traverse(n => n.layers.set(0));
+    r.hiddenBody = null;
+  }
+  if (r && obj && r.hiddenBody !== obj) {
+    obj.traverse(n => n.layers.set(1));
+    r.hiddenBody = obj;
+  }
+}
+
+function startRide(objectId) {
+  const agents = rideableAgents();
+  if (!agents.length) return false;
+  let rt = objectId && state.runtimes.get(objectId);
+  if (!rt || rt.spec.carrier !== "articulated_agent") rt = agents[0];
+  if (document.pointerLockElement === canvas && document.exitPointerLock) document.exitPointerLock();
+  state.camMode = "ride";
+  document.getElementById("btnOrbitMode").classList.remove("active");
+  document.getElementById("btnWalkMode").classList.remove("active");
+  document.getElementById("btnRide").classList.add("active");
+  state.ride = {
+    id: rt.spec.id,
+    view: state.ride?.view || "chase",
+    memberIdx: 0,
+    prevPos: null,
+    fwd: new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).setY(0).normalize(),
+    lookAt: camera.position.clone().add(new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion)),
+    speed: 0,
+    zoom: 1,
+    yawOff: 0,
+    pitchOff: 0,
+  };
+  selectObject(rt.spec.id);
+  return true;
+}
+
+function stopRide() {
+  setRideBodyHidden(null);
+  state.ride = null;
+  document.getElementById("btnRide")?.classList.remove("active");
+  camera.fov = BASE_FOV;
+  camera.updateProjectionMatrix();
+}
+
+function cycleRide(step = 1) {
+  const agents = rideableAgents();
+  if (!agents.length || !state.ride) return;
+  const i = agents.findIndex(rt => rt.spec.id === state.ride.id);
+  const next = agents[(i + step + agents.length) % agents.length];
+  setRideBodyHidden(null);
+  state.ride.id = next.spec.id;
+  state.ride.memberIdx = 0;
+  state.ride.prevPos = null;
+  selectObject(next.spec.id);
+}
+
+function updateRideCamera(dt) {
+  const r = state.ride;
+  const rt = r && state.runtimes.get(r.id);
+  if (!rt) { setCameraMode("orbit"); return; }
+  const pos = rideSubjectPosition(rt);
+  r.waiting = !pos;
+  if (!pos) return; // tracked object is off-screen in the source video right now: hold the shot
+
+  // Heading from motion (smoothed); keep the last heading when stationary / perched
+  if (r.prevPos) {
+    const d = pos.clone().sub(r.prevPos);
+    const dist = d.length();
+    if (dist > 4) { r.prevPos = pos.clone(); return; } // video loop wrapped: teleport, don't streak
+    r.speed = THREE.MathUtils.lerp(r.speed, dist / Math.max(dt, 1e-4), Math.min(1, dt * 3));
+    if (dist > 1e-4) r.fwd.lerp(d.normalize(), Math.min(1, dt * 3.5)).normalize();
+  }
+  r.prevPos = pos.clone();
+
+  const prof = RIDE_PROFILES[rt.spec.agent?.rig_kind] || RIDE_PROFILES.fox;
+  const scale = (rt.spec.agent?.entity_scale || 1) * (rt.spec.scale || 1);
+  const up = new THREE.Vector3(0, 1, 0);
+  const flat = r.fwd.clone().setY(0);
+  if (flat.lengthSq() < 1e-6) flat.set(0, 0, -1);
+  flat.normalize();
+  // Mouse-drag look-around offsets
+  const look = flat.clone().applyAxisAngle(up, r.yawOff);
+  look.y = r.fwd.y * 0.6 + r.pitchOff;
+  look.normalize();
+
+  setRideBodyHidden(r.view === "pov" ? r.body : null);
+  let desiredPos, desiredLook, fov;
+  if (r.view === "pov") {
+    desiredPos = pos.clone().addScaledVector(up, prof.eye * scale).addScaledVector(flat, prof.fwdEye * scale);
+    desiredLook = desiredPos.clone().addScaledVector(look, 12);
+    fov = prof.fov[1];
+  } else {
+    const [back, height] = prof.chase;
+    desiredPos = pos.clone().addScaledVector(look, -back * scale * r.zoom).addScaledVector(up, height * scale * r.zoom);
+    desiredLook = pos.clone().addScaledVector(look, 3.5 * scale).addScaledVector(up, 0.3 * scale);
+    fov = prof.fov[0];
+  }
+  if (state.world) {
+    const gh = sampleTerrainHeight(state.world.terrain, desiredPos.x, desiredPos.z);
+    const floor = Math.max(gh, state.world.terrain.has_water ? state.world.terrain.water_level : -99) + 0.35;
+    if (desiredPos.y < floor) desiredPos.y = floor;
+  }
+  const isFlyer = Boolean(rt.group.userData.flockMembers || rt.group.userData.lanternMembers);
+  const kPos = 1 - Math.exp(-dt * (r.view === "pov" ? 14 : isFlyer ? 5 : 8));
+  const kLook = 1 - Math.exp(-dt * (r.view === "pov" ? 12 : 7));
+  camera.position.lerp(desiredPos, kPos);
+  r.lookAt.lerp(desiredLook, kLook);
+  camera.lookAt(r.lookAt);
+  if (Math.abs(camera.fov - fov) > 0.05) {
+    camera.fov = THREE.MathUtils.lerp(camera.fov, fov, Math.min(1, dt * 3));
+    camera.updateProjectionMatrix();
+  }
+}
+
+function rideHudHtml() {
+  const r = state.ride;
+  const rt = state.runtimes.get(r.id);
+  const name = rt ? rt.spec.name : r.id;
+  const tracked = rt?.spec.behavior?.kind === "follow_video_path" ? " · 🎬 video-tracked path" : "";
+  const status = r.waiting ? `<span style="color:#f5b14c;">waiting for it to re-enter the video frame…</span>` : `${(r.speed * 3.6).toFixed(0)} km/h`;
+  return `<b>🎥 Riding: ${name}</b> · ${r.view === "pov" ? "FIRST-PERSON" : "CHASE"}${tracked}<br/>` +
+    `${status}<br/>` +
+    (document.body.classList.contains("clean") ? `<b>V</b> view · <b>N</b> next · <b>Esc</b> exit` :
+    `<b>V</b> switch view · <b>N</b>/<b>B</b> next/prev agent · drag look · scroll zoom · <b>Esc</b> exit`);
+}
+
 function setCameraMode(mode) {
+  if (state.ride) stopRide();
+  state.inPlanView = false;
   state.camMode = mode;
   document.getElementById("btnOrbitMode").classList.toggle("active", mode === "orbit");
   document.getElementById("btnWalkMode").classList.toggle("active", mode === "walk");
   if (mode === "walk") {
-    // Initialize yaw/pitch from current camera orientation
     const dir = new THREE.Vector3();
     camera.getWorldDirection(dir);
     state.walkYaw = Math.atan2(-dir.x, -dir.z);
     state.walkPitch = Math.asin(THREE.MathUtils.clamp(dir.y, -0.95, 0.95));
-    // Drop to eye level if currently high up
     if (camera.position.y > 7.5 && state.world) {
       const gh = sampleTerrainHeight(state.world.terrain, camera.position.x, camera.position.z);
       camera.position.y = gh + 2.1;
@@ -604,9 +1162,7 @@ function setCameraMode(mode) {
       try { canvas.requestPointerLock(); } catch {}
     }
   } else {
-    if (document.pointerLockElement === canvas && document.exitPointerLock) {
-      document.exitPointerLock();
-    }
+    if (document.pointerLockElement === canvas && document.exitPointerLock) document.exitPointerLock();
     const dir = new THREE.Vector3();
     camera.getWorldDirection(dir);
     setOrbitFromLook(camera.position.clone(), camera.position.clone().addScaledVector(dir, 14));
@@ -628,14 +1184,12 @@ function updateWalkCamera(dt) {
   if (state.keys.has("Space") || state.keys.has("KeyE")) camera.position.y += spd;
   if (state.keys.has("KeyQ") || state.keys.has("ControlLeft")) camera.position.y -= spd;
 
-  // Keep camera cleanly above terrain heightfield
   if (state.world) {
     const minY = sampleTerrainHeight(state.world.terrain, camera.position.x, camera.position.z) + 1.35;
     if (camera.position.y < minY) camera.position.y = minY;
   }
 }
 
-// Mouse drag / pointer-lock / wheel / raycast selection
 let dragBtn = -1, lastMX = 0, lastMY = 0, downMX = 0, downMY = 0;
 const raycaster = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
@@ -648,13 +1202,12 @@ canvas.addEventListener("mousedown", e => {
 });
 window.addEventListener("mouseup", e => {
   if (dragBtn === 0 && Math.hypot(e.clientX - downMX, e.clientY - downMY) < 4 && state.camMode === "orbit") {
-    // Click-to-select 3D object via raycasting
     const rect = canvas.getBoundingClientRect();
     ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
     raycaster.setFromCamera(ndc, camera);
     const hits = raycaster.intersectObjects(worldRoot.children, true);
-    const hitObj = hits.find(h => h.object?.userData?.objectId);
+    const hitObj = hits.find(h => h.object?.userData?.objectId && !h.object?.userData?.isContactAO);
     selectObject(hitObj ? hitObj.object.userData.objectId : null);
   }
   dragBtn = -1;
@@ -667,8 +1220,15 @@ window.addEventListener("mousemove", e => {
       state.walkYaw -= dx * 0.0026;
       state.walkPitch = THREE.MathUtils.clamp(state.walkPitch - dy * 0.0024, -1.4, 1.4);
     }
-    lastMX = e.clientX;
-    lastMY = e.clientY;
+    lastMX = e.clientX; lastMY = e.clientY;
+    return;
+  }
+  if (state.camMode === "ride") {
+    if (dragBtn === 0 && state.ride) {
+      state.ride.yawOff -= (e.clientX - lastMX) * 0.005;
+      state.ride.pitchOff = THREE.MathUtils.clamp(state.ride.pitchOff - (e.clientY - lastMY) * 0.004, -0.9, 0.9);
+    }
+    lastMX = e.clientX; lastMY = e.clientY;
     return;
   }
   if (dragBtn === 0) {
@@ -687,22 +1247,29 @@ window.addEventListener("mousemove", e => {
     state.orbitTarget.addScaledVector(up, dy * panSpeed);
     updateOrbitCamera();
   }
-  lastMX = e.clientX;
-  lastMY = e.clientY;
+  lastMX = e.clientX; lastMY = e.clientY;
 });
 canvas.addEventListener("wheel", e => {
   e.preventDefault();
   if (state.camMode === "orbit") {
     state.orbitDist = THREE.MathUtils.clamp(state.orbitDist * (1 + e.deltaY * 0.001), 2.5, 72);
     updateOrbitCamera();
+  } else if (state.camMode === "ride" && state.ride) {
+    state.ride.zoom = THREE.MathUtils.clamp(state.ride.zoom * (1 + e.deltaY * 0.001), 0.5, 3.5);
   }
 }, { passive: false });
 
 window.addEventListener("keydown", e => {
   if (document.activeElement && ["TEXTAREA", "INPUT"].includes(document.activeElement.tagName)) return;
-  if (e.code === "KeyF") {
-    setCameraMode(state.camMode === "walk" ? "orbit" : "walk");
-    return;
+  if (e.code === "KeyF") { setCameraMode(state.camMode === "walk" ? "orbit" : "walk"); return; }
+  if (e.code === "KeyH") { toggleClean(); return; }
+  if (e.code === "KeyP") { document.body.classList.toggle("panels-hidden"); setTimeout(resize, 0); return; }
+  if (e.code === "KeyR" && state.camMode !== "ride") { startRide(state.selectedId); return; }
+  if (state.camMode === "ride") {
+    if (e.code === "Escape") { setCameraMode("orbit"); return; }
+    if (e.code === "KeyV") { state.ride.view = state.ride.view === "pov" ? "chase" : "pov"; state.ride.yawOff = 0; state.ride.pitchOff = 0; return; }
+    if (e.code === "KeyN") { cycleRide(1); return; }
+    if (e.code === "KeyB") { cycleRide(-1); return; }
   }
   state.keys.add(e.code);
 });
@@ -738,7 +1305,6 @@ function capture4ViewPlate() {
   const prevSelVis = selRing.visible;
   selRing.visible = false;
 
-  // Pick a hero landmark (SDF sculpture or fountain or first visible landmark) for View 4 close-up
   let hero = [...state.runtimes.values()].find(r => r.spec.carrier === "implicit_sdf")
     || [...state.runtimes.values()].find(r => r.spec.parametric?.kind === "fountain")
     || [...state.runtimes.values()][0];
@@ -776,7 +1342,6 @@ function capture4ViewPlate() {
     ctx.fillText(v.label, gx + 8, gy + 16);
   });
 
-  // Restore exact live user camera
   camera.aspect = prevAspect;
   camera.updateProjectionMatrix();
   camera.position.copy(prevPos);
@@ -784,7 +1349,7 @@ function capture4ViewPlate() {
   selRing.visible = prevSelVis;
   renderer.render(scene, camera);
 
-  return plate.toDataURL("image/jpeg", 0.88);
+  return plate.toDataURL("image/jpeg", 0.90);
 }
 
 async function runHydrogen4ViewAudit(allowRepair = true) {
@@ -804,7 +1369,6 @@ async function runHydrogen4ViewAudit(allowRepair = true) {
 
   state.world = data.world;
   if (data.repaired_ids && data.repaired_ids.length > 0) {
-    // Hot-update ONLY the objects Hydrogen repaired!
     const objMap = new Map(state.world.objects.map(o => [o.id, o]));
     for (const rid of data.repaired_ids) {
       const sp = objMap.get(rid);
@@ -816,7 +1380,7 @@ async function runHydrogen4ViewAudit(allowRepair = true) {
 }
 
 // ---------------------------------------------------------------------------
-// UI Rendering: Blender-Style Outliner, Audit Panel, History, World List
+// UI Rendering & Fidelity Lab Actions
 // ---------------------------------------------------------------------------
 function openModal(url, title) {
   document.getElementById("modalTitle").textContent = title;
@@ -828,7 +1392,6 @@ function renderSidebars() {
   const w = state.world;
   if (!w) return;
 
-  // Outliner grouped by Blender-style Collections
   const outliner = document.getElementById("outliner");
   outliner.innerHTML = "";
   const vis = w.objects.filter(o => o.visible);
@@ -847,23 +1410,26 @@ function renderSidebars() {
       const row = document.createElement("div");
       row.className = "obj-row" + (state.selectedId === o.id ? " selected" : "");
       row.dataset.oid = o.id;
+      const isBaked = Boolean(o.implicit_sdf?.baked_front_url);
       const tagClass = o.carrier === "implicit_sdf" ? "tag-sdf" : (o.carrier === "articulated_agent" ? "tag-agent" : "tag-param");
       const tagTxt = o.carrier === "implicit_sdf"
-        ? `SDF ${o.implicit_sdf?.face_count || ""}`
+        ? (isBaked ? `SDF+BAKE` : `SDF ${o.implicit_sdf?.face_count || ""}`)
         : (o.carrier === "articulated_agent" ? `AGENT ${o.agent?.rig_kind}` : o.parametric?.kind || "param");
       const behIcon = o.behavior?.kind && o.behavior.kind !== "none" ? ` → ${o.behavior.target_id || o.behavior.kind}` : "";
       row.innerHTML = `
         <span class="obj-name" title="${o.id}${behIcon}">${o.name}<span style="color:var(--muted); font-size:10px;"> v${o.version}${behIcon}</span></span>
         <span class="carrier-tag ${tagClass}">${tagTxt}</span>
+        ${o.carrier === "articulated_agent" ? `<button type="button" class="ride-btn" title="Ride along with ${o.name}">🎥 Ride</button>` : ""}
       `;
       row.onclick = () => selectObject(o.id);
+      const rb = row.querySelector(".ride-btn");
+      if (rb) rb.onclick = ev => { ev.stopPropagation(); startRide(o.id); };
       row.ondblclick = () => inspectObject(o.id);
       grp.appendChild(row);
     }
     outliner.appendChild(grp);
   }
 
-  // Cost Ledger
   const c = w.cumulative_costs;
   document.getElementById("kpiCarbon").textContent = c.carbon_calls;
   document.getElementById("kpiHydrogen").textContent = c.hydrogen_calls;
@@ -871,7 +1437,6 @@ function renderSidebars() {
   document.getElementById("kpiSDF").textContent = c.sdf_meshes_compiled;
   document.getElementById("kpiRev").textContent = w.revision;
 
-  // Latest Hydrogen 4-View Audit
   const lastWithAudit = [...w.history].reverse().find(r => r.audit);
   const auditBadge = document.getElementById("auditBadge");
   const auditBox = document.getElementById("auditBox");
@@ -902,9 +1467,15 @@ function renderSidebars() {
     auditBadge.className = "pill";
   }
 
-  // Revision History
   const hist = document.getElementById("historyBox");
   hist.innerHTML = "";
+  if (w.style_guide) {
+    const sg = document.createElement("div");
+    sg.className = "style-guide";
+    sg.innerHTML = `<b>Art direction</b> (kept consistent across edits)<br/>`;
+    sg.appendChild(document.createTextNode(w.style_guide));
+    hist.appendChild(sg);
+  }
   for (const rev of [...w.history].reverse()) {
     const el = document.createElement("div");
     el.className = "rev-item";
@@ -916,10 +1487,11 @@ function renderSidebars() {
       </div>
       <div style="color:var(--text);">"${rev.instruction}"</div>
       <div class="mono" style="color:var(--muted);">
-        Carbon: ${rev.carbon_summary}<br/>
+        ${rev.carbon_summary}<br/>
         Changed: [${rev.changed_object_ids.join(", ") || "env"}] | NB tex: ${rev.costs.nano_banana_texture_calls} | SDF: ${rev.costs.sdf_meshes_compiled}<br/>
-        Time: ${(t.total_ms/1000).toFixed(1)}s (Carbon ${t.carbon_ms.toFixed(0)}ms, NB ${t.nano_banana_ms.toFixed(0)}ms, SDF ${t.sdf_compile_ms.toFixed(0)}ms)
+        Time: ${(t.total_ms / 1000).toFixed(1)}s (Carbon ${t.carbon_ms.toFixed(0)}ms, NB ${t.nano_banana_ms.toFixed(0)}ms, SDF ${t.sdf_compile_ms.toFixed(0)}ms)
       </div>
+      ${renderRefUsage(w, rev)}
     `;
     hist.appendChild(el);
   }
@@ -948,7 +1520,7 @@ async function refreshWorldsList() {
     const el = document.createElement("div");
     el.className = "world-chip" + (state.world && state.world.world_id === item.world_id ? " active" : "");
     el.innerHTML = `
-      <div style="font-weight:600;">${item.title}</div>
+      <div style="font-weight:600;">${item.from_video ? "🎬 " : ""}${item.title}</div>
       <div class="mono" style="color:var(--muted);">rev ${item.revision} · ${item.object_count} objs (${item.sdf_count} SDF, ${item.agent_count} agents)</div>
     `;
     el.onclick = async () => {
@@ -967,8 +1539,9 @@ async function refreshWorldsList() {
 
 function setBusy(flag, elId, msg = "") {
   state.busy = flag;
-  ["btnGenerate", "btnApplyEdit", "btnUndo", "btnRunAudit"].forEach(id => {
-    document.getElementById(id).disabled = flag;
+  ["btnGenerate", "btnVideoWorld", "btnVideoSample", "btnApplyEdit", "btnUndo", "btnRunAudit", "btnEnhancePBR", "btnBakeHero", "btnNeuralStill"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = flag;
   });
   if (elId) document.getElementById(elId).textContent = msg;
 }
@@ -985,19 +1558,31 @@ document.querySelectorAll(".edit-chip").forEach(b => {
 
 document.getElementById("btnGenerate").onclick = async () => {
   const prompt = document.getElementById("worldPrompt").value.trim();
-  if (!prompt) return;
-  setBusy(true, "genStatus", "Gemini 4 Carbon compiling 3D WorldIR -> Nano Banana PBR textures -> Marching Cubes SDF...");
+  const nRefs = state.refFiles.length;
+  if (!prompt && !nRefs) return;
+  setBusy(true, "genStatus", nRefs
+    ? `Gemini 4 Carbon reading ${nRefs} reference image(s) + prompt -> 3D WorldIR -> Nano Banana PBR -> Marching Cubes SDF...`
+    : "Gemini 4 Carbon compiling 3D WorldIR -> Nano Banana PBR -> Marching Cubes SDF...");
   try {
-    const r = await fetch("/api/worlds", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt }),
-    });
+    let r;
+    if (nRefs) {
+      const form = new FormData();
+      form.append("prompt", prompt);
+      appendRefs(form);
+      r = await fetch("/api/worlds/compose", { method: "POST", body: form });
+    } else {
+      r = await fetch("/api/worlds", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      });
+    }
     const world = await r.json();
     if (!r.ok) throw new Error(world.detail || "Generation failed");
+    if (nRefs) clearRefFiles();
     await loadFullWorld(world, true);
     await refreshWorldsList();
-    setBusy(true, "genStatus", "World rendered! Running independent 4-Viewpoint Gemini 4 Hydrogen spatial audit...");
+    setBusy(true, "genStatus", "Running independent 4-Viewpoint Gemini 4 Hydrogen spatial audit...");
     await runHydrogen4ViewAudit(true);
     setBusy(false, "genStatus", `Compiled ${world.title} (${world.objects.length} persistent 3D objects).`);
   } catch (err) {
@@ -1005,19 +1590,72 @@ document.getElementById("btnGenerate").onclick = async () => {
   }
 };
 
+async function reconstructFromVideo(useSample) {
+  const fileEl = document.getElementById("videoFile");
+  const file = fileEl.files && fileEl.files[0];
+  if (!useSample && !file) {
+    document.getElementById("videoStatus").textContent = "Choose a video file first (or use the sample).";
+    return;
+  }
+  const form = new FormData();
+  if (useSample) form.append("use_sample", "true"); else form.append("file", file);
+  form.append("hint", document.getElementById("videoHint").value.trim());
+  const nRefs = state.refFiles.length;
+  appendRefs(form);
+  const t0 = performance.now();
+  setBusy(true, "videoStatus", "OpenCV tracking moving objects -> Gemini 4 Carbon reconstructing the 3D scene from frames -> lifting tracks to 3D paths... (1-3 min)");
+  const tick = setInterval(() => {
+    document.getElementById("videoStatus").textContent = `Reconstructing 3D world from video... ${Math.round((performance.now() - t0) / 1000)}s`;
+  }, 1000);
+  try {
+    const r = await fetch("/api/worlds/from-video", { method: "POST", body: form });
+    const world = await r.json();
+    if (!r.ok) throw new Error(world.detail || "Reconstruction failed");
+    if (nRefs) clearRefFiles();
+    await loadFullWorld(world, true);
+    await refreshWorldsList();
+    const nTracks = world.source_video?.tracks?.length || 0;
+    setBusy(false, "videoStatus", `Reconstructed ${world.title}: ${world.objects.length} persistent 3D objects, ${nTracks} video-tracked agents (${Math.round((performance.now() - t0) / 1000)}s). Walk around it, or chat-edit it below.`);
+  } catch (err) {
+    setBusy(false, "videoStatus", `Error: ${err.message}`);
+  } finally {
+    clearInterval(tick);
+  }
+}
+document.getElementById("btnVideoWorld").onclick = () => reconstructFromVideo(false);
+document.getElementById("btnVideoSample").onclick = () => reconstructFromVideo(true);
+document.getElementById("btnPipToggle").onclick = () => {
+  const pip = document.getElementById("videoPip");
+  pip.classList.toggle("collapsed");
+  document.getElementById("btnPipToggle").textContent = pip.classList.contains("collapsed") ? "+" : "–";
+};
+
 document.getElementById("btnApplyEdit").onclick = async () => {
   if (!state.world) return;
   const instruction = document.getElementById("chatEdit").value.trim();
-  if (!instruction) return;
-  setBusy(true, "editStatus", "Gemini 4 Carbon compiling surgical 3D WorldDiff (unrelated objects preserved)...");
+  const nRefs = state.refFiles.length;
+  if (!instruction && !nRefs) return;
+  setBusy(true, "editStatus", nRefs
+    ? `Gemini 4 Carbon integrating ${nRefs} reference image(s) as a surgical 3D WorldDiff...`
+    : "Gemini 4 Carbon compiling surgical 3D WorldDiff (unrelated objects preserved)...");
   try {
-    const r = await fetch(`/api/worlds/${state.world.world_id}/edit`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ instruction, selected_object_id: state.selectedId }),
-    });
+    let r;
+    if (nRefs) {
+      const form = new FormData();
+      form.append("instruction", instruction);
+      if (state.selectedId) form.append("selected_object_id", state.selectedId);
+      appendRefs(form);
+      r = await fetch(`/api/worlds/${state.world.world_id}/edit-with-images`, { method: "POST", body: form });
+    } else {
+      r = await fetch(`/api/worlds/${state.world.world_id}/edit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instruction, selected_object_id: state.selectedId }),
+      });
+    }
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || "Edit failed");
+    if (nRefs) clearRefFiles();
     await applySurgicalDelta(data.world, data.delta);
     await refreshWorldsList();
     setBusy(false, "editStatus", `Rev ${data.world.revision}: ${data.delta.action} (${data.delta.changed_object_ids.length} mutated, ${data.delta.unchanged_object_ids.length} preserved).`);
@@ -1050,6 +1688,78 @@ document.getElementById("btnRunAudit").onclick = async () => {
   }
 };
 
+// Fidelity Lab buttons (Approaches A, B, C directly accessible in the Studio!)
+document.getElementById("btnEnhancePBR").onclick = async () => {
+  if (!state.world) return;
+  setBusy(true, "fidelityStatus", "Approach A: Synthesizing persistent roof/hill PBR + cavity AO + 3D SDF-AO...");
+  try {
+    const r = await fetch(`/api/worlds/${state.world.world_id}/enhance-materials`, { method: "POST" });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || "Enhance failed");
+    await loadFullWorld(data.world, false);
+    await refreshWorldsList();
+    setBusy(false, "fidelityStatus", `Approach A complete: +${data.enhancement.new_textures.length} PBR sets, ${data.enhancement.sdf_recompiled} SDF-AO meshes.`);
+  } catch (err) {
+    setBusy(false, "fidelityStatus", `Error: ${err.message}`);
+  }
+};
+
+document.getElementById("btnBakeHero").onclick = async () => {
+  if (!state.world) return;
+  const sdfObj = (state.selectedId && state.world.objects.find(o => o.id === state.selectedId && o.carrier === "implicit_sdf"))
+    || state.world.objects.find(o => o.visible && o.carrier === "implicit_sdf");
+  if (!sdfObj) {
+    document.getElementById("fidelityStatus").textContent = "No implicit_sdf object in this world to bake.";
+    return;
+  }
+  setBusy(true, "fidelityStatus", `Approach B: Capturing ortho Front+Back of ${sdfObj.id} -> 1 Nano Banana object-space bake...`);
+  try {
+    const { front_b64, back_b64 } = captureObjectOrthoFrontBack(sdfObj.id);
+    const r = await fetch(`/api/worlds/${state.world.world_id}/objects/${sdfObj.id}/bake-neural`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ front_b64, back_b64 }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || "Bake failed");
+    state.world = data.world;
+    const updated = state.world.objects.find(o => o.id === sdfObj.id);
+    if (updated) await mountSingleObject(updated, state.world);
+    renderSidebars();
+    inspectObject(sdfObj.id);
+    setBusy(false, "fidelityStatus", `Approach B baked onto ${sdfObj.id} (${(data.bake.inference_ms / 1000).toFixed(1)}s) — walk 360° @ 60 FPS!`);
+  } catch (err) {
+    setBusy(false, "fidelityStatus", `Error: ${err.message}`);
+  }
+};
+
+document.getElementById("btnNeuralStill").onclick = async () => {
+  if (!state.world) return;
+  setBusy(true, "fidelityStatus", "Approach C: Exporting live G-Buffer (RGB+Depth+Normals+ObjectID) -> Nano Banana still...");
+  try {
+    const gbuf = captureGBufferPasses(null, null, 768, 480);
+    const r = await fetch(`/api/worlds/${state.world.world_id}/neural-render`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tag: `cam_${Date.now() % 10000}`,
+        mode: "gbuffer_conditioned",
+        rgb_b64: gbuf.rgb,
+        depth_b64: gbuf.depth,
+        normal_b64: gbuf.normals,
+        obj_id_b64: gbuf.obj_id,
+      }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || "Neural still failed");
+    const m = data.metrics;
+    setBusy(false, "fidelityStatus", `Approach C (${(m.inference_ms / 1000).toFixed(1)}s): Edge F1=${m.edge_f1_3px}, ObjMask Recall=${m.object_silhouette_recall}`);
+    openModal(data.enhanced_rgb_url, `Approach C: G-Buffer Neural Still (Edge F1=${m.edge_f1_3px}, ${(m.inference_ms / 1000).toFixed(1)}s)`);
+  } catch (err) {
+    setBusy(false, "fidelityStatus", `Error: ${err.message}`);
+  }
+};
+
 document.getElementById("btnOrbitMode").onclick = () => setCameraMode("orbit");
 document.getElementById("btnWalkMode").onclick = () => setCameraMode("walk");
 document.getElementById("btnCamFront").onclick = () => {
@@ -1064,28 +1774,76 @@ document.getElementById("btnCamOverview").onclick = () => {
   setCameraMode("orbit");
   setOrbitFromLook(new THREE.Vector3(20, 14, 20), new THREE.Vector3(0, 2.0, 0));
 };
+document.getElementById("btnCamVideo").onclick = () => {
+  const sv = state.world?.source_video;
+  if (!sv) return;
+  setCameraMode("orbit");
+  setOrbitFromLook(new THREE.Vector3(...sv.camera_pos), new THREE.Vector3(...sv.camera_look_at));
+};
+let planRotDeg = 0;
+function setPlanView(rotDeg = planRotDeg) {
+  setCameraMode("orbit");
+  planRotDeg = ((rotDeg % 360) + 360) % 360;
+  const half = (state.world?.terrain?.size || 72) * 0.36;
+  const a = THREE.MathUtils.degToRad(planRotDeg);
+  setOrbitFromLook(new THREE.Vector3(Math.sin(a) * 1.2, half * 1.9, Math.cos(a) * 1.2), new THREE.Vector3(0, 0, 0));
+  state.inPlanView = true;
+}
+// Click again while in Plan View to rotate 90° (align with an uploaded plan's orientation)
+document.getElementById("btnCamPlan").onclick = () => setPlanView(state.inPlanView ? planRotDeg + 90 : planRotDeg);
+function toggleClean(force) {
+  const on = document.body.classList.toggle("clean", force);
+  document.getElementById("btnClean").textContent = on ? "Studio view" : "Clean view";
+  setTimeout(resize, 0);
+}
+document.getElementById("btnClean").onclick = () => toggleClean();
+document.getElementById("btnRide").onclick = () => {
+  if (state.camMode === "ride") setCameraMode("orbit");
+  else if (!startRide(state.selectedId)) document.getElementById("vpHud").textContent = "No moving agents in this world to ride.";
+};
+// Linkable views: #view=plan | aerial | video
+async function applyHashView() {
+  const hp = new URLSearchParams(location.hash.slice(1));
+  const v = hp.get("view");
+  if (hp.get("studio") === "1") toggleClean(false);
+  const wid = hp.get("world");
+  if (wid && state.world?.world_id !== wid) {
+    const r = await fetch(`/api/worlds/${wid}`);
+    if (r.ok) { await loadFullWorld(await r.json(), true); refreshWorldsList(); }
+  }
+  if (v === "plan") setPlanView(Number(hp.get("rot") || 0));
+  else if (v === "aerial") document.getElementById("btnCamOverview").click();
+  else if (v === "video") document.getElementById("btnCamVideo").click();
+  else if (v === "ride" || v === "ride-pov") { startRide(hp.get("agent")); if (state.ride && v === "ride-pov") state.ride.view = "pov"; }
+}
+window.addEventListener("hashchange", applyHashView);
 document.getElementById("btnCamInspect").onclick = () => {
   if (state.selectedId) inspectObject(state.selectedId);
 };
 document.getElementById("modalClose").onclick = () => document.getElementById("modal").classList.remove("open");
 document.getElementById("modal").onclick = e => { if (e.target.id === "modal") e.target.classList.remove("open"); };
 
-// Resize handling
 function resize() {
   const parent = canvas.parentElement;
   const w = Math.max(1, parent.clientWidth);
   const h = Math.max(1, parent.clientHeight);
   renderer.setSize(w, h, false);
+  composer.setSize(w, h);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }
 window.addEventListener("resize", resize);
 resize();
 
-// Expose clean hook for automated testing / multi-view capture
+// Expose clean hooks for reproducible multi-camera benchmarking & live inspection
 window.__WORLD_STUDIO__ = {
   state,
+  loadFullWorld,
+  mountSingleObject,
   capture4ViewPlate,
+  captureGBufferPasses,
+  captureObjectOrthoFrontBack,
+  measureSyncGpuFrameMs,
   runHydrogen4ViewAudit,
   setOrbitFromLook,
   setCameraMode,
@@ -1094,7 +1852,6 @@ window.__WORLD_STUDIO__ = {
   THREE,
 };
 
-// Main Real-Time 60 FPS Loop
 let lastTime = performance.now(), frames = 0, fpsTimer = 0, elapsed = 0;
 function animate(now) {
   const dt = Math.min(0.05, (now - lastTime) / 1000);
@@ -1107,9 +1864,18 @@ function animate(now) {
   }
 
   if (state.camMode === "walk") updateWalkCamera(dt);
+  const sv = state.world?.source_video;
+  if (sv) {
+    state.videoTime = srcVideoEl.readyState >= 2 ? srcVideoEl.currentTime : (state.videoTime + dt) % Math.max(sv.duration, 0.5);
+  }
   updateAutonomousWorld(elapsed, dt);
+  if (state.camMode === "ride") updateRideCamera(dt);
 
-  if (state.world) {
+  if (state.world && state.camMode === "ride" && state.ride) {
+    document.getElementById("vpHud").innerHTML = rideHudHtml();
+  } else if (state.world && document.body.classList.contains("clean")) {
+    document.getElementById("vpHud").innerHTML = `<b>${state.world.title}</b>`;
+  } else if (state.world) {
     const p = camera.position;
     document.getElementById("vpHud").innerHTML =
       `<b>${state.world.title}</b> [Rev ${state.world.revision}] · Mode: <b>${state.camMode.toUpperCase()}</b><br/>` +
@@ -1117,8 +1883,8 @@ function animate(now) {
       `Orbit: Drag/Zoom/Click | Walk: <b>F</b> + WASD + Mouse`;
   }
 
-  renderer.render(scene, camera);
+  composer.render();
   requestAnimationFrame(animate);
 }
 
-refreshWorldsList().then(() => requestAnimationFrame(animate));
+refreshWorldsList().then(() => { applyHashView(); requestAnimationFrame(animate); });

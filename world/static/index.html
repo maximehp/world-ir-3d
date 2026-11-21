@@ -113,6 +113,59 @@
     }
     .vp-controls button { padding: 5px 9px; font-size: 11.5px; }
 
+    /* ---------- Clean presentation mode (default). Press H or "Studio view" for the full tool ---------- */
+    body.clean header .brand .pill, body.clean #localityBadge, body.clean #fpsBadge,
+    body.clean .studio-only, body.clean .sidebar.right,
+    body.clean .preset-btn, body.clean .edit-chip, body.clean #selectedHint,
+    body.clean .card > .status[style] { display: none !important; }
+    body.clean .workspace { grid-template-columns: 270px 1fr 0; }
+    body.clean .sidebar.left .wrap:empty { display: none; }
+    body.clean .card { padding-top: 8px; padding-bottom: 8px; }
+    body.clean .vp-hud { font-size: 12px; padding: 6px 10px; }
+    body.clean.panels-hidden .workspace { grid-template-columns: 1fr; }
+    body.clean.panels-hidden .sidebar.left { display: none; }
+    .video-pip {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 300px;
+      background: rgba(9, 11, 16, 0.86);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      backdrop-filter: blur(8px);
+    }
+    .video-pip[hidden] { display: none; }
+    .video-pip .pip-head {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 4px 8px; font-size: 11px; color: var(--muted);
+    }
+    .video-pip .pip-head button { padding: 1px 7px; font-size: 11px; }
+    .video-pip video { width: 100%; display: block; background: #000; }
+    .video-pip.collapsed video { display: none; }
+    .ref-drop {
+      border: 1px dashed var(--border); border-radius: 6px; padding: 9px; text-align: center;
+      font-size: 11.5px; color: var(--muted); cursor: pointer; transition: border-color .15s, background .15s;
+    }
+    .ref-drop.over { border-color: var(--accent); background: rgba(120, 170, 255, 0.08); }
+    .ref-thumbs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin-top: 6px; }
+    .ref-thumbs:empty { display: none; }
+    .ref-thumb { position: relative; aspect-ratio: 1; border-radius: 5px; overflow: hidden; border: 1px solid var(--border); }
+    .ref-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .ref-thumb button {
+      position: absolute; top: 2px; right: 2px; padding: 0 5px; font-size: 11px; line-height: 16px;
+      border-radius: 4px; background: rgba(0,0,0,0.7);
+    }
+    .ref-usage { display: flex; gap: 7px; align-items: flex-start; margin-top: 5px; }
+    .ref-usage img { width: 38px; height: 38px; object-fit: cover; border-radius: 4px; border: 1px solid var(--border); flex: none; }
+    .ref-role { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--accent); }
+    .style-guide { font-size: 11px; color: var(--text); border-left: 2px solid var(--accent); padding: 4px 8px; margin-bottom: 8px; white-space: pre-wrap; }
+    .video-drop {
+      display: block; width: 100%; box-sizing: border-box; padding: 8px;
+      border: 1px dashed var(--border); border-radius: 6px; font-size: 11.5px; color: var(--muted); cursor: pointer;
+    }
+    .video-drop input { display: block; margin-top: 5px; max-width: 100%; color: inherit; font-size: 11px; }
+
     .card {
       background: var(--panel2);
       border: 1px solid var(--border);
@@ -189,6 +242,8 @@
     }
     .obj-row:hover { border-color: #32415c; }
     .obj-row.selected { border-color: var(--accent); background: #13283c; }
+    .ride-btn { padding: 1px 6px; font-size: 10.5px; margin-left: 4px; flex: none; }
+    #btnRide.active { border-color: var(--accent); color: var(--accent); }
     .obj-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .carrier-tag {
       font-family: ui-monospace, monospace;
@@ -245,7 +300,7 @@
     .modal-box img { max-width: 100%; max-height: 78vh; object-fit: contain; border-radius: 4px; }
   </style>
 </head>
-<body>
+<body class="clean">
   <header>
     <div class="brand">
       <span>WorldIR 3D</span>
@@ -255,8 +310,10 @@
       <span class="pill">Nano Banana: Seamless PBR</span>
     </div>
     <div class="wrap">
+      <button id="btnClean" type="button" title="Toggle clean presentation view (H)">Studio view</button>
       <span id="localityBadge" class="pill g">Persistent 3D Scene Graph</span>
       <span id="fpsBadge" class="pill">-- FPS</span>
+      <a href="/video2sim/" class="pill c" style="text-decoration:none">Video → 3D Sim ↗</a>
     </div>
   </header>
 
@@ -264,20 +321,47 @@
     <!-- LEFT: Generate World + Surgical Chat Edits + Saved Worlds -->
     <aside class="sidebar left">
       <div class="card">
-        <div class="card-title">1. Generate Full 3D World</div>
-        <textarea id="worldPrompt" rows="3" placeholder="Describe any small 3D world with buildings, landmarks, organic sculptures, and moving creatures/vehicles..."></textarea>
+        <div class="card-title">
+          <span>Reference Images</span>
+          <span id="refCount" class="pill">0 / 8</span>
+        </div>
+        <label id="refDrop" class="ref-drop">
+          Drop, paste (⌘V) or click to add floor / site plans, building photos, Pinterest mood boards, material swatches or object references.
+          <input type="file" id="refFiles" accept="image/*" multiple hidden />
+        </label>
+        <div id="refThumbs" class="ref-thumbs"></div>
+        <div class="status" style="color:var(--muted);">Gemini 4 Carbon decides how to use each image. They apply to the next Compile, Video Reconstruct, or Chat Edit.</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Create a World</div>
+        <textarea id="worldPrompt" rows="3" placeholder="Describe your scene. What is there, and how is it arranged?"></textarea>
         <div class="wrap">
           <button type="button" class="preset-btn" data-p="A sunlit Mediterranean hill village plaza with a central tiered stone fountain, a tall stone clock tower, four cozy terracotta cottages with balconies, cypress trees, a carved marble owl statue on a pedestal, a red vintage scooter patrolling the plaza, and a flock of blue birds circling and landing on the clock tower roof.">Mediterranean Village</button>
           <button type="button" class="preset-btn" data-p="A misty Nordic harbor cove at golden hour with a red-and-white lighthouse, timber fishing cottages, a stone archway, pine trees, a wooden windmill with spinning sails, a sculptural mossy sea-serpent rock monument, a sailboat cruising the water, and white seabirds circling the lighthouse.">Nordic Harbor</button>
           <button type="button" class="preset-btn" data-p="A twilight lantern garden courtyard with a central carved stone archway, a tranquil pavilion gazebo, cherry blossom trees, warm iron lampposts, an organic sculpted glowing crystal lotus fountain centerpiece, a red fox trotting around the courtyard, and floating paper lanterns drifting above the gazebo.">Twilight Lantern Garden</button>
+          <button type="button" class="preset-btn" data-p="A vast white salt flat under a cold blue sky. Three narrow red monoliths stand in a straight line receding into the distance, each twice as tall as the last. Everything else is empty and still.">Salt Flat Monoliths</button>
         </div>
         <button id="btnGenerate" class="primary">Compile 3D World</button>
         <div id="genStatus" class="status"></div>
       </div>
 
       <div class="card">
+        <div class="card-title">2D Video → 3D World</div>
+        <label class="video-drop">Upload a 2D video (.mp4 / .mov / .webm). OpenCV tracks every moving object, Gemini 4 Carbon rebuilds the scene in 3D, and tracked objects replay their motion as 3D agents.
+          <input type="file" id="videoFile" accept="video/*" />
+        </label>
+        <input type="text" id="videoHint" placeholder="Optional direction, e.g. 'make it a snowy dusk'" style="margin-top:6px;" />
+        <div class="row" style="margin-top:6px; gap:6px; display:flex;">
+          <button id="btnVideoSample" type="button" title="Reconstruct the bundled bird-landscape sample video">Use Sample Video</button>
+          <button id="btnVideoWorld" class="primary" type="button">Reconstruct 3D World</button>
+        </div>
+        <div id="videoStatus" class="status"></div>
+      </div>
+
+      <div class="card">
         <div class="card-title">
-          <span>2. Surgical Chat Modification</span>
+          <span>Edit by Chat</span>
           <button id="btnUndo" style="padding:2px 7px; font-size:10.5px;">Undo (0 calls)</button>
         </div>
         <div id="selectedHint" class="mono" style="color:var(--muted);">Selected: none (click any 3D object or Outliner item)</div>
@@ -292,8 +376,22 @@
         <div id="editStatus" class="status"></div>
       </div>
 
+      <div class="card studio-only">
+        <div class="card-title">3. Appearance Fidelity Lab (WorldIR Authoritative)</div>
+        <div class="row">
+          <button id="btnEnhancePBR" title="Approach A: Add persistent roof tile & hill biome PBR + cavity AO + 3D SDF-AO">A: Upgrade PBR + SDF-AO</button>
+        </div>
+        <div class="row">
+          <button id="btnBakeHero" title="Approach B: 1 Nano Banana call in object space -> permanent 360° dual-projected SDF detail">B: Bake 360° SDF Hero (1 Call)</button>
+        </div>
+        <div class="row">
+          <button id="btnNeuralStill" title="Approach C: Still-frame G-Buffer-conditioned Nano Banana render from current camera">C: G-Buffer Neural Still</button>
+        </div>
+        <div id="fidelityStatus" class="status"></div>
+      </div>
+
       <div class="card">
-        <div class="card-title">Saved 3D Worlds</div>
+        <div class="card-title">Worlds</div>
         <div id="worldsList" style="display:flex; flex-direction:column; gap:5px;">
           <div style="color:var(--muted);">No worlds generated yet.</div>
         </div>
@@ -308,14 +406,21 @@
         Orbit: Left-drag rotate · Right-drag pan · Scroll zoom · Click object to select<br/>
         Walk Mode (WASD): Press <b>F</b> or click Walk Mode · Mouse look · Space/Shift fly
       </div>
+      <div id="videoPip" class="video-pip" hidden>
+        <div class="pip-head"><span id="pipTitle">Source video · synced to 3D</span><button id="btnPipToggle" type="button">–</button></div>
+        <video id="srcVideo" muted loop playsinline controls></video>
+      </div>
       <div class="vp-controls">
         <button id="btnOrbitMode" class="active">Orbit Camera</button>
         <button id="btnWalkMode">Walk Mode (WASD + Look)</button>
-        <button id="btnCamFront">Front</button>
-        <button id="btnCamBack">180° Back</button>
+        <button id="btnCamFront" class="studio-only">Front</button>
+        <button id="btnCamBack" class="studio-only">180° Back</button>
         <button id="btnCamOverview">Aerial 3/4</button>
-        <button id="btnCamInspect" title="Orbit close around currently selected object">Inspect Selected</button>
-        <button id="btnRunAudit" class="primary">Run 4-View Hydrogen Audit</button>
+        <button id="btnRide" title="Ride along with the selected (or first) moving agent · R">🎥 Ride Along</button>
+        <button id="btnCamPlan" title="Top-down view: compare against a floor / site plan">Plan View</button>
+        <button id="btnCamVideo" title="Match the original video camera" hidden>Video Camera</button>
+        <button id="btnCamInspect" class="studio-only" title="Orbit close around currently selected object">Inspect Selected</button>
+        <button id="btnRunAudit" class="primary studio-only">Run 4-View Hydrogen Audit</button>
       </div>
     </main>
 
@@ -370,6 +475,7 @@
     </div>
   </div>
 
+  <script type="importmap">{ "imports": { "three": "/static/vendor/three.module.min.js" } }</script>
   <script type="module" src="/static/studio.js"></script>
 </body>
 </html>

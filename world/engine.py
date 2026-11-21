@@ -21,7 +21,9 @@ from world.gemini_3d import (
     carbon_compile_world_edit,
     hydrogen_audit_multiview,
 )
+from world.neural_baker import bake_sdf_dual_projection, neural_enhance_gbuffer_view
 from world.schema import (
+    SourceVideo,
     MultiViewAuditVerdict,
     PBRTextureAsset,
     TextureRequest,
@@ -31,8 +33,9 @@ from world.schema import (
     WorldState,
     WorldTimings,
 )
+from world.references import prepare_reference_images, record_references, save_reference_images
 from world.sdf_compiler import compile_sdf_mesh
-from world.textures import synthesize_pbr_texture
+from world.textures import ensure_ao_for_existing_albedo, synthesize_pbr_texture
 
 
 DATA_ROOT = pathlib.Path(__file__).resolve().parent / "data"
@@ -70,6 +73,8 @@ class WorldManager:
     def _persist(self, world: WorldState) -> None:
         wdir = self._wdir(world.world_id)
         (wdir / "world.json").write_text(world.model_dump_json(indent=2))
+        # Persist each revision so Undo survives server restarts
+        (wdir / f"rev_{world.revision}.json").write_text(world.model_dump_json())
         self._worlds[world.world_id] = world
 
     def _load_existing(self) -> None:
@@ -77,7 +82,17 @@ class WorldManager:
             try:
                 w = WorldState.model_validate_json(p.read_text())
                 self._worlds[w.world_id] = w
-                self._snapshots[w.world_id] = [w.model_copy(deep=True)]
+                snaps = []
+                for rp in sorted(p.parent.glob("rev_*.json"), key=lambda x: int(x.stem.split("_")[1])):
+                    if int(rp.stem.split("_")[1]) < w.revision:
+                        try:
+                            snaps.append(WorldState.model_validate_json(rp.read_text()))
+                        except Exception:
+                            pass
+                self._snapshots[w.world_id] = snaps + [w.model_copy(deep=True)]
+                cur = p.parent / f"rev_{w.revision}.json"
+                if not cur.exists():
+                    cur.write_text(w.model_dump_json())
             except Exception:
                 pass
 
@@ -91,6 +106,7 @@ class WorldManager:
                 "object_count": len([o for o in w.objects if o.visible]),
                 "sdf_count": len([o for o in w.objects if o.visible and o.carrier == "implicit_sdf"]),
                 "agent_count": len([o for o in w.objects if o.visible and o.carrier == "articulated_agent"]),
+                "from_video": w.source_video is not None,
                 "costs": w.cumulative_costs.model_dump(),
             }
             for w in reversed(list(self._worlds.values()))
@@ -107,6 +123,7 @@ class WorldManager:
         requests: list[TextureRequest],
         costs: WorldCosts,
         timings: WorldTimings,
+        refs: list | None = None,
     ) -> dict[str, PBRTextureAsset]:
         if not requests:
             return {}
@@ -115,7 +132,12 @@ class WorldManager:
         t0 = time.perf_counter()
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
             futs = {
-                pool.submit(synthesize_pbr_texture, tr.id, tr.prompt, wdir, 512): tr
+                pool.submit(
+                    synthesize_pbr_texture, tr.id, tr.prompt, wdir, 512,
+                    refs[tr.reference_image_index].jpeg
+                    if refs and tr.reference_image_index is not None and 0 <= tr.reference_image_index < len(refs)
+                    else None,
+                ): tr
                 for tr in requests
             }
             for fut in concurrent.futures.as_completed(futs):
@@ -129,6 +151,7 @@ class WorldManager:
                         albedo_url=self._asset_url(world_id, files["albedo_name"]),
                         normal_url=self._asset_url(world_id, files["normal_name"]),
                         roughness_url=self._asset_url(world_id, files["rough_name"]),
+                        ao_url=self._asset_url(world_id, files["ao_name"]),
                         source="nano_banana_pbr",
                     )
                 except Exception as exc:
@@ -167,22 +190,71 @@ class WorldManager:
             obj.id = cand
             seen.add(cand)
 
-    def create_world(self, prompt: str) -> WorldState:
-        """Compile an unseen natural-language prompt into a full multi-carrier 3D world."""
+    def create_world(self, prompt: str, images: list[tuple[bytes, str]] | None = None) -> WorldState:
+        """Compile an unseen natural-language prompt (+ optional reference images) into a full multi-carrier 3D world."""
+        refs = prepare_reference_images(images or [])
+        if not prompt.strip():
+            prompt = "Design a world from the attached reference images."
         t0 = time.perf_counter()
         world_id = _new_id("w3d")
         costs = WorldCosts()
         timings = WorldTimings()
 
         # 1. Gemini 4 Carbon compiles structured multi-carrier 3D WorldDraft
-        draft, c_ms = carbon_compile_world(prompt)
+        draft, c_ms = carbon_compile_world(prompt, refs=refs)
+        costs.carbon_calls += 1
+        timings.carbon_ms += round(c_ms, 1)
+        return self._finalize_new_world(world_id, prompt, draft, costs, timings, t0, refs=refs)
+
+    def create_world_from_video(
+        self, video_path: str, filename: str, user_hint: str = "", images: list[tuple[bytes, str]] | None = None
+    ) -> WorldState:
+        """Reconstruct a persistent, editable 3D WorldIR from a 2D video (Video2Sim OpenCV + Gemini 4 Carbon)."""
+        import shutil
+
+        from video2sim.backend.video_analyzer import analyze_video_opencv
+        from world.video_world import VIDEO_CAMERA_FOV_DEG, bind_and_lift_tracks, compile_world_from_video
+
+        t0 = time.perf_counter()
+        world_id = _new_id("w3d")
+        costs = WorldCosts()
+        timings = WorldTimings()
+
+        ext = pathlib.Path(filename).suffix.lower() or ".mp4"
+        stored = self._wdir(world_id) / f"source_video{ext}"
+        shutil.copyfile(video_path, stored)
+        video_url = self._asset_url(world_id, stored.name)
+
+        artifacts = analyze_video_opencv(video_path=str(stored), filename=filename, video_url=video_url)
+        (self._wdir(world_id) / "video_background.jpg").write_bytes(artifacts.background_jpeg)
+
+        refs = prepare_reference_images(images or [])
+        draft, c_ms = compile_world_from_video(artifacts, user_hint, refs=refs)
         costs.carbon_calls += 1
         timings.carbon_ms += round(c_ms, 1)
 
+        tracks3d = bind_and_lift_tracks(draft, artifacts)
+        md = artifacts.metadata
+        source_video = SourceVideo(
+            url=video_url,
+            filename=filename,
+            duration=md.duration,
+            fps=md.fps,
+            width=md.width,
+            height=md.height,
+            fov_deg=VIDEO_CAMERA_FOV_DEG,
+            camera_pos=draft.camera_spawn,
+            camera_look_at=draft.camera_look_at,
+            tracks=tracks3d,
+        )
+        prompt = f"[video] {filename}" + (f" — {user_hint}" if user_hint else "")
+        return self._finalize_new_world(world_id, prompt, draft, costs, timings, t0, source_video=source_video, refs=refs)
+
+    def _finalize_new_world(self, world_id, prompt, draft, costs, timings, t0, source_video=None, refs=None) -> WorldState:
         self._sanitize_object_ids(draft.objects)
 
         # 2. Synthesize Nano Banana PBR textures (parallel) + compile Marching Cubes SDF meshes (~9ms each)
-        textures = self._compile_textures_parallel(world_id, draft.texture_requests, costs, timings)
+        textures = self._compile_textures_parallel(world_id, draft.texture_requests, costs, timings, refs=refs)
         self._compile_sdf_objects(world_id, draft.objects, costs, timings)
 
         # Validate texture_id references so missing failed textures fall back cleanly to procedural shading
@@ -207,11 +279,20 @@ class WorldManager:
             cumulative_costs=costs,
             camera_spawn=draft.camera_spawn,
             camera_look_at=draft.camera_look_at,
+            source_video=source_video,
+            style_guide=draft.style_guide,
         )
+        ref_usage = []
+        if refs:
+            names = save_reference_images(self._wdir(world_id), refs, revision=1)
+            ref_usage = record_references(
+                world, refs, [self._asset_url(world_id, n) for n in names], draft.reference_usage, revision=1
+            )
         world.history.append(
             WorldRevision(
                 revision=1,
-                action="create_world",
+                action="create_world_from_video" if source_video else "create_world",
+                reference_usage=ref_usage,
                 instruction=prompt,
                 carbon_summary=draft.summary,
                 changed_object_ids=[o.id for o in world.objects],
@@ -231,6 +312,7 @@ class WorldManager:
         world_id: str,
         instruction: str,
         selected_object_id: str | None = None,
+        images: list[tuple[bytes, str]] | None = None,
     ) -> tuple[WorldState, dict]:
         """Apply a surgical natural-language edit, returning updated WorldState and delta summary for hot-patching."""
         t0 = time.perf_counter()
@@ -240,12 +322,15 @@ class WorldManager:
         timings = WorldTimings()
 
         # 1. Gemini 4 Carbon compiles minimal surgical diff
-        patch, c_ms = carbon_compile_world_edit(world, instruction, selected_object_id=selected_object_id)
+        refs = prepare_reference_images(images or [])
+        if not instruction.strip():
+            instruction = "Integrate the attached reference images into this world."
+        patch, c_ms = carbon_compile_world_edit(world, instruction, selected_object_id=selected_object_id, refs=refs)
         costs.carbon_calls += 1
         timings.carbon_ms += round(c_ms, 1)
 
         # 2. Synthesize ONLY newly requested Nano Banana PBR textures (0 calls if none needed!)
-        new_tex = self._compile_textures_parallel(world_id, patch.new_texture_requests, costs, timings)
+        new_tex = self._compile_textures_parallel(world_id, patch.new_texture_requests, costs, timings, refs=refs)
         world.textures.update(new_tex)
         valid_tex = set(world.textures.keys())
 
@@ -338,12 +423,21 @@ class WorldManager:
         unchanged_ids = [o.id for o in world.objects if o.visible and o.id not in changed_ids]
 
         world.revision += 1
+        if patch.new_style_guide:
+            world.style_guide = patch.new_style_guide
+        ref_usage = []
+        if refs:
+            names = save_reference_images(self._wdir(world_id), refs, revision=world.revision)
+            ref_usage = record_references(
+                world, refs, [self._asset_url(world_id, n) for n in names], patch.reference_usage, revision=world.revision
+            )
         timings.total_ms = round((time.perf_counter() - t0) * 1000.0, 1)
         world.cumulative_costs = _add_costs(world.cumulative_costs, costs)
         world.history.append(
             WorldRevision(
                 revision=world.revision,
                 action=patch.action,
+                reference_usage=ref_usage,
                 instruction=instruction,
                 carbon_summary=patch.summary,
                 changed_object_ids=changed_ids,
@@ -431,10 +525,205 @@ class WorldManager:
         snaps = self._snapshots.get(world_id, [])
         if len(snaps) <= 1:
             return self.get_world(world_id)
-        snaps.pop()
+        popped = snaps.pop()
+        (self._wdir(world_id) / f"rev_{popped.revision}.json").unlink(missing_ok=True)
         restored = snaps[-1].model_copy(deep=True)
         self._persist(restored)
         return restored
+
+    def enhance_world_materials(self, world_id: str) -> tuple[WorldState, dict]:
+        """Approach A persistent upgrade:
+        1. Derive missing cavity AO maps for all existing PBR textures (0 API calls)
+        2. Synthesize missing biome roof-tile + outer-hill PBR sets via Nano Banana (1-2 calls, cached forever)
+        3. Recompile implicit_sdf meshes with exact 3D Inigo Quilez SDF Ambient Occlusion vertex colors (~35 ms)
+        """
+        t0 = time.perf_counter()
+        world = self.get_world(world_id).model_copy(deep=True)
+        wdir = self._wdir(world_id)
+        costs = WorldCosts()
+        timings = WorldTimings()
+
+        # 1. Backfill AO maps on existing textures (0 API calls)
+        ao_backfilled = 0
+        for tid, tex in world.textures.items():
+            if not tex.ao_url:
+                alb_name = pathlib.Path(tex.albedo_url).name
+                ao_name = f"tex_{tid}_ao.jpg"
+                alb_path = wdir / alb_name
+                if alb_path.exists():
+                    ensure_ao_for_existing_albedo(alb_path, wdir / ao_name)
+                    tex.ao_url = self._asset_url(world_id, ao_name)
+                    ao_backfilled += 1
+
+        # 2. Generate missing persistent roof tile & outer hill biome PBR sets (2 Nano Banana calls, persisted!)
+        to_gen: list[TextureRequest] = []
+        style = world.terrain.style
+        roof_tex_id = "roof_tiles_pbr"
+        hill_tex_id = "hill_terrain_pbr"
+
+        if roof_tex_id not in world.textures:
+            if style == "coastal_harbor":
+                r_prompt = "weathered dark Nordic slate roof shingles with subtle sea-salt lichen and crisp tile overlaps"
+            elif style == "snowy_valley":
+                r_prompt = "weathered alpine cedar wood roof shakes dusted with crisp frost"
+            else:
+                r_prompt = "weathered Mediterranean hand-laid curved terracotta clay roof tiles with warm orange ochre variations and subtle aged moss in crevices"
+            to_gen.append(TextureRequest(id=roof_tex_id, prompt=r_prompt))
+
+        if hill_tex_id not in world.textures:
+            if style == "coastal_harbor":
+                h_prompt = "Nordic coastal mossy granite turf, windswept highland grass, and dark wet pebbles"
+            elif style == "snowy_valley":
+                h_prompt = "natural wind-rippled alpine snowpack with subtle exposed slate rock and pine needles"
+            elif style == "desert_oasis":
+                h_prompt = "warm wind-rippled desert sand and arid ochre rocky scrub earth"
+            else:
+                h_prompt = "natural sunlit Mediterranean hillside grass, dry olive-green meadow turf, small limestone pebbles, and warm terracotta soil"
+            to_gen.append(TextureRequest(id=hill_tex_id, prompt=h_prompt))
+
+        new_tex = self._compile_textures_parallel(world_id, to_gen, costs, timings)
+        world.textures.update(new_tex)
+
+        # Bind roof & hill PBR sets persistently across terrain + buildings/towers
+        if hill_tex_id in world.textures:
+            world.terrain.hill_texture_id = hill_tex_id
+        for obj in world.objects:
+            if obj.visible and obj.carrier == "parametric_assembly" and obj.parametric and obj.parametric.kind in ("building", "tower", "gazebo"):
+                if roof_tex_id in world.textures:
+                    obj.material.roof_texture_id = roof_tex_id
+
+        # 3. Recompile SDF meshes with exact 3D analytic SDF-AO vertex colors (~35 ms)
+        sdf_objs = [o for o in world.objects if o.visible and o.carrier == "implicit_sdf" and o.implicit_sdf is not None]
+        self._compile_sdf_objects(world_id, sdf_objs, costs, timings)
+
+        world.revision += 1
+        timings.total_ms = round((time.perf_counter() - t0) * 1000.0, 1)
+        world.cumulative_costs = _add_costs(world.cumulative_costs, costs)
+        world.history.append(
+            WorldRevision(
+                revision=world.revision,
+                action="enhance_persistent_pbr",
+                instruction="Upgrade persistent PBR materials (roof tiles, hill biome splat, cavity AO) + 3D SDF-AO",
+                carbon_summary=f"Synthesized {len(new_tex)} persistent PBR sets, backfilled {ao_backfilled} AO maps, baked 3D SDF-AO on {len(sdf_objs)} SDF meshes.",
+                changed_object_ids=[o.id for o in sdf_objs],
+                unchanged_object_ids=[o.id for o in world.objects if o.visible and o not in sdf_objs],
+                rebuilt_entire_world=False,
+                costs=costs,
+                timings=timings,
+            )
+        )
+        self._snapshots.setdefault(world_id, []).append(world.model_copy(deep=True))
+        self._persist(world)
+        return world, {
+            "new_textures": list(new_tex.keys()),
+            "ao_backfilled": ao_backfilled,
+            "sdf_recompiled": len(sdf_objs),
+            "costs": costs.model_dump(),
+            "timings": timings.model_dump(),
+        }
+
+    def bake_sdf_object_neural(
+        self,
+        world_id: str,
+        object_id: str,
+        front_b64: str,
+        back_b64: str,
+        style_hint: str | None = None,
+    ) -> tuple[WorldState, dict]:
+        """Approach B: Spend 1 Nano Banana call ONCE in object space to bake persistent
+        360-degree dual-projected carved surface detail + normal maps onto a single 3D SDF object."""
+        t0 = time.perf_counter()
+        world = self.get_world(world_id).model_copy(deep=True)
+        wdir = self._wdir(world_id)
+        target = next((o for o in world.objects if o.id == object_id and o.visible), None)
+        if target is None or target.carrier != "implicit_sdf" or target.implicit_sdf is None:
+            raise ValueError(f"Object {object_id} is not a visible implicit_sdf carrier")
+
+        mat_style = style_hint or (
+            world.textures[target.material.texture_id].prompt
+            if target.material.texture_id and target.material.texture_id in world.textures
+            else f"carved weathered stone ({target.material.color})"
+        )
+        res, nb_ms = bake_sdf_dual_projection(
+            obj_id=target.id,
+            description=target.implicit_sdf.description,
+            material_style=mat_style,
+            front_b64=front_b64,
+            back_b64=back_b64,
+            out_dir=wdir,
+        )
+        target.implicit_sdf.baked_front_url = self._asset_url(world_id, res["front_albedo"])
+        target.implicit_sdf.baked_back_url = self._asset_url(world_id, res["back_albedo"])
+        target.implicit_sdf.baked_front_normal_url = self._asset_url(world_id, res["front_normal"])
+        target.implicit_sdf.baked_back_normal_url = self._asset_url(world_id, res["back_normal"])
+        target.implicit_sdf.baked_prompt = mat_style
+        target.version += 1
+
+        costs = WorldCosts(nano_banana_texture_calls=1)
+        timings = WorldTimings(nano_banana_ms=round(nb_ms, 1), total_ms=round((time.perf_counter() - t0) * 1000.0, 1))
+        world.revision += 1
+        world.cumulative_costs = _add_costs(world.cumulative_costs, costs)
+        world.history.append(
+            WorldRevision(
+                revision=world.revision,
+                action="object_space_neural_bake",
+                instruction=f"Bake persistent dual-projection neural detail onto {target.id}",
+                carbon_summary=f"1 Nano Banana object-space bake -> front/back albedo + normal maps permanently bound to {target.id}.",
+                changed_object_ids=[target.id],
+                unchanged_object_ids=[o.id for o in world.objects if o.visible and o.id != target.id],
+                rebuilt_entire_world=False,
+                costs=costs,
+                timings=timings,
+            )
+        )
+        self._snapshots.setdefault(world_id, []).append(world.model_copy(deep=True))
+        self._persist(world)
+
+        return world, {
+            "object_id": target.id,
+            "baked_front_url": target.implicit_sdf.baked_front_url,
+            "baked_back_url": target.implicit_sdf.baked_back_url,
+            "ortho_input_url": self._asset_url(world_id, res["ortho_input"]),
+            "ortho_painted_url": self._asset_url(world_id, res["ortho_painted"]),
+            "inference_ms": round(nb_ms, 1),
+        }
+
+    def neural_render_view(
+        self,
+        world_id: str,
+        tag: str,
+        rgb_b64: str,
+        mode: str = "gbuffer_conditioned",
+        depth_b64: str | None = None,
+        normal_b64: str | None = None,
+        obj_id_b64: str | None = None,
+        style_ref_b64: str | None = None,
+    ) -> dict:
+        """Approach C: Experimental geometry-conditioned still-frame neural enhancement."""
+        world = self.get_world(world_id)
+        wdir = self._wdir(world_id)
+        scene_desc = f"{world.title} ({world.atmosphere.time_of_day}): {world.prompt}"
+        res, ms = neural_enhance_gbuffer_view(
+            scene_description=scene_desc,
+            rgb_b64=rgb_b64,
+            out_dir=wdir,
+            tag=tag,
+            mode=mode,
+            depth_b64=depth_b64,
+            normal_b64=normal_b64,
+            obj_id_b64=obj_id_b64,
+            style_ref_b64=style_ref_b64,
+        )
+        return {
+            "world_id": world_id,
+            "tag": tag,
+            "mode": mode,
+            "src_rgb_url": self._asset_url(world_id, res["src_rgb"]),
+            "gbuffer_url": self._asset_url(world_id, res["gbuffer"]) if res["gbuffer"] else None,
+            "enhanced_rgb_url": self._asset_url(world_id, res["enhanced_rgb"]),
+            "metrics": res["metrics"],
+            "inference_ms": round(ms, 1),
+        }
 
 
 world_manager = WorldManager()

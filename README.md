@@ -16,7 +16,51 @@ A full-3D generative world representation and live WebGL2 studio where worlds ar
   - **Gemini 4 Hydrogen (`gemini-4-hydrogen`):** Independently audits a live 4-viewpoint 3D WebGL render plate (Elevated 3/4 Overview, Eye-Level Front, Opposite 180° Back, Hero Close-Up) and can emit bounded spatial fixes.
 - **Real-Time WebGL2 Studio (`world/static/`):** Vendored Three.js `0.170.0`, ACESFilmic tone mapping, 2048px `PCFSoftShadowMap`, dynamic sky-dome PMREM reflections, free **WASD + Mouse Look** walking/flying, 360° orbit + click-to-select, and surgical live hot-patching.
 
-## Quick Start
+## 2D Video → 3D World (Video2Sim merged into WorldIR)
+
+In the studio, card **1b. 2D Video → 3D World** takes an uploaded video (or the bundled sample) and reconstructs it as a normal persistent WorldIR world:
+
+1. **OpenCV** (`video2sim/backend/video_analyzer.py`) computes a clean temporal-median background, keyframes, and tracked 2D trajectories of every moving object.
+2. **Gemini 4 Carbon** (`world/video_world.py`) sees the background + keyframes and compiles a multi-carrier world matching the video, estimates the original camera, and binds each trajectory to an articulated agent (`behavior.kind = "follow_video_path"`).
+3. Each trajectory is **unprojected through the matched camera** into a timed 3D path (`world.source_video.tracks`). The studio replays the paths in sync with a picture-in-picture of the source video; **Video Camera** snaps to the original viewpoint.
+
+The result supports everything else: walk mode, surgical chat edits (tracked agents keep their paths), undo, and the Hydrogen audit. API: `POST /api/worlds/from-video` (multipart `file` or `use_sample=true`, optional `hint`).
+
+## Reference Images → World (plans, mood boards, photos, swatches)
+
+Card **0. Reference Images** accepts up to 8 images (pick, drag-drop, or paste with ⌘V, e.g. straight from Pinterest). They apply to the next **Compile**, **Video Reconstruct**, or **Chat Edit**. Gemini 4 Carbon classifies each image and integrates it by role (`world/references.py`):
+
+| Role | How it's integrated |
+|---|---|
+| Floor / site plan | Read top-down (image center = origin, up = north/−Z); rooms/buildings placed at their footprint centroids, sized and wall-aligned, labels become names |
+| Building reference | Matches floors, roof style, proportions, colors on the relevant building (SDF for unusual shapes) |
+| Mood board | Drives the whole world's palette, lighting, atmosphere, vegetation, and materials |
+| Material swatch | Becomes an image-conditioned Nano Banana seamless PBR texture bound to fitting surfaces |
+| Object reference | Added as a sculpted SDF (or closest parametric/agent) focal object |
+| Scene photo | Composition, terrain, and atmosphere reference |
+
+Conflicts resolve as: the prompt decides **what**, plans decide **where**, mood boards decide **how it looks**. Each revision records a plain-English `reference_usage` per image (shown with thumbnails in the edit history), and a persistent `style_guide` keeps later edits on-theme. **Plan View** gives a top-down camera to compare against a plan; views are linkable via `#view=plan|aerial|video`.
+
+API: `POST /api/worlds/compose` (multipart `prompt`, `images[]`), `POST /api/worlds/{id}/edit-with-images` (`instruction`, `selected_object_id`, `images[]`); `/api/worlds/from-video` also accepts `images[]`.
+
+## Ride Along
+
+Click **🎥 Ride Along** (or press **R**, or the 🎥 button on any agent in the Outliner) to attach the camera to a moving agent: birds, foxes, scooters, cars, boats, lanterns, including agents replaying **video-tracked paths**. **V** toggles chase / first-person (the rider's own body is hidden), **N/B** cycles agents, drag to look around, scroll to zoom, **Esc** exits. The HUD shows live speed. Linkable: `#world=<id>&view=ride&agent=<object_id>` (or `view=ride-pov`).
+
+## Quick Start (merged prototype)
+
+```bash
+cp .env.example .env   # add GEMINI_API_KEY
+./start.sh             # syncs deps, builds the Video2Sim frontend once, starts the server
+```
+
+- **WorldIR 3D studio** (prompt → persistent 3D world, chat edits): http://127.0.0.1:8000/
+- **Video2Sim 3D** (video → OpenCV tracking + Gemini Vision → Three.js sim, merged from the `Harsh` branch): http://127.0.0.1:8000/video2sim/
+
+Both run in one FastAPI process; Video2Sim's backend (`video2sim/backend`) is mounted as a sub-app at `/video2sim`.
+Run `REBUILD=1 ./start.sh` after editing `video2sim/frontend/src`, or use `cd video2sim/frontend && npm run dev` (Vite on :5173 proxies to :8000) for hot reload.
+
+## Quick Start (WorldIR only)
 
 ```bash
 cp .env.example .env

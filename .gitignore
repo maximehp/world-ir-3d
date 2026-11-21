@@ -11,8 +11,9 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
-# Generated runtime world assets (large textures, SDF meshes, audit plates)
+# Generated runtime world assets & raw benchmark outputs
 world/data/worlds/
+world/data/benchmarks/
 
 # Superseded 2.5D prototype artifacts (retained locally, excluded from 3D repo)
 app/
@@ -22,3 +23,11 @@ main.py
 
 # OS
 .DS_Store
+
+# Video2Sim
+video2sim/uploads/
+video2sim/frontend/node_modules/
+video2sim/frontend/dist/
+
+# Local demo world backups
+demo/backup/

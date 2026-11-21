@@ -1,0 +1,1583 @@
+{
+  "world_id": "w3d_d10a06fe",
+  "title": "Misty Autumn Riverside Campus",
+  "prompt": "A small riverside campus where students hang out in autumn",
+  "terrain": {
+    "size": 88.0,
+    "style": "coastal_harbor",
+    "ground_color": "#4a4d46",
+    "hill_color": "#5c6845",
+    "plaza_radius": 22.0,
+    "hill_height": 5.2,
+    "has_water": true,
+    "water_level": -0.35,
+    "water_color": "#3a5f63",
+    "texture_id": "autumn_flagstone",
+    "hill_texture_id": null
+  },
+  "atmosphere": {
+    "time_of_day": "dusk",
+    "sky_zenith": "#485b69",
+    "sky_horizon": "#cfa07a",
+    "sun_color": "#ffb86c",
+    "sun_intensity": 1.9,
+    "sun_elevation_deg": 16.0,
+    "sun_azimuth_deg": 235.0,
+    "fog_color": "#b8ada3",
+    "fog_density": 0.016,
+    "ambient_intensity": 0.85,
+    "cloud_count": 14,
+    "wind_strength": 0.65
+  },
+  "textures": {
+    "charred_timber": {
+      "id": "charred_timber",
+      "prompt": "Seamless tileable PBR architectural texture of dark charred Japanese cedar wood planks (shou sugi ban) with subtle warm timber grain and matte weathered finish",
+      "albedo_url": "/world-assets/worlds/w3d_d10a06fe/tex_charred_timber_albedo.jpg",
+      "normal_url": "/world-assets/worlds/w3d_d10a06fe/tex_charred_timber_normal.jpg",
+      "roughness_url": "/world-assets/worlds/w3d_d10a06fe/tex_charred_timber_rough.jpg",
+      "ao_url": "/world-assets/worlds/w3d_d10a06fe/tex_charred_timber_ao.jpg",
+      "source": "nano_banana_pbr"
+    },
+    "slate_roof_tile": {
+      "id": "slate_roof_tile",
+      "prompt": "Seamless tileable PBR texture of traditional dark grey weathered Japanese ceramic roof tiles with subtle moss and patina teal accents",
+      "albedo_url": "/world-assets/worlds/w3d_d10a06fe/tex_slate_roof_tile_albedo.jpg",
+      "normal_url": "/world-assets/worlds/w3d_d10a06fe/tex_slate_roof_tile_normal.jpg",
+      "roughness_url": "/world-assets/worlds/w3d_d10a06fe/tex_slate_roof_tile_rough.jpg",
+      "ao_url": "/world-assets/worlds/w3d_d10a06fe/tex_slate_roof_tile_ao.jpg",
+      "source": "nano_banana_pbr"
+    },
+    "autumn_flagstone": {
+      "id": "autumn_flagstone",
+      "prompt": "Seamless tileable top-down PBR texture of wet dark grey slate flagstone paving stones with mossy crevices and scattered fallen crimson Japanese maple leaves, rainy autumn atmosphere",
+      "albedo_url": "/world-assets/worlds/w3d_d10a06fe/tex_autumn_flagstone_albedo.jpg",
+      "normal_url": "/world-assets/worlds/w3d_d10a06fe/tex_autumn_flagstone_normal.jpg",
+      "roughness_url": "/world-assets/worlds/w3d_d10a06fe/tex_autumn_flagstone_rough.jpg",
+      "ao_url": "/world-assets/worlds/w3d_d10a06fe/tex_autumn_flagstone_ao.jpg",
+      "source": "nano_banana_pbr"
+    },
+    "weathered_wet_maple_wood": {
+      "id": "weathered_wet_maple_wood",
+      "prompt": "Seamless tileable top-down PBR texture of dark rain-slicked weathered timber planks with deep wood grain, glossy wet sheen, subtle mossy crevices, and scattered fallen crimson and burnt-orange Japanese maple leaves",
+      "albedo_url": "/world-assets/worlds/w3d_d10a06fe/tex_weathered_wet_maple_wood_albedo.jpg",
+      "normal_url": "/world-assets/worlds/w3d_d10a06fe/tex_weathered_wet_maple_wood_normal.jpg",
+      "roughness_url": "/world-assets/worlds/w3d_d10a06fe/tex_weathered_wet_maple_wood_rough.jpg",
+      "ao_url": "/world-assets/worlds/w3d_d10a06fe/tex_weathered_wet_maple_wood_ao.jpg",
+      "source": "nano_banana_pbr"
+    }
+  },
+  "objects": [
+    {
+      "id": "courtyard_pond",
+      "name": "Courtyard Pond",
+      "collection": "landmarks",
+      "carrier": "parametric_assembly",
+      "position": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "rotation_y_deg": 0.0,
+      "scale": 1.2,
+      "material": {
+        "color": "#565c58",
+        "secondary_color": "#608b8c",
+        "accent_color": "#e09b3d",
+        "roughness": 0.65,
+        "metalness": 0.08,
+        "emissive": "#000000",
+        "emissive_intensity": 0.0,
+        "texture_id": "autumn_flagstone",
+        "roof_texture_id": null,
+        "texture_repeat": 3.0
+      },
+      "parametric": {
+        "kind": "fountain",
+        "width": 7.5,
+        "height": 2.2,
+        "depth": 7.5,
+        "floors": 1,
+        "roof_style": "flat",
+        "tree_style": "oak",
+        "seed": 101,
+        "has_balcony": false,
+        "has_chimney": false,
+        "light_on": true
+      },
+      "implicit_sdf": null,
+      "agent": null,
+      "behavior": {
+        "kind": "none",
+        "target_id": null,
+        "orbit_radius": 6.0,
+        "orbit_height": 5.5,
+        "speed": 0.65,
+        "perch_duration_sec": 3.5,
+        "fly_duration_sec": 7.5,
+        "waypoints_xz": [],
+        "video_track_id": null
+      },
+      "version": 1,
+      "visible": true
+    },
+    {
+      "id": "stone_lantern_monument",
+      "name": "Carved Mossy Toro Lantern Monument",
+      "collection": "landmarks",
+      "carrier": "implicit_sdf",
+      "position": [
+        0.0,
+        0.0,
+        -4.5
+      ],
+      "rotation_y_deg": 0.0,
+      "scale": 1.0,
+      "material": {
+        "color": "#6a7265",
+        "secondary_color": "#6d7c50",
+        "accent_color": "#e09b3d",
+        "roughness": 0.82,
+        "metalness": 0.05,
+        "emissive": "#e09b3d",
+        "emissive_intensity": 0.35,
+        "texture_id": "autumn_flagstone",
+        "roof_texture_id": null,
+        "texture_repeat": 2.0
+      },
+      "parametric": null,
+      "implicit_sdf": {
+        "description": "Traditional carved Japanese stone toro garden lantern with flared pagoda cap, hollowed light chamber, cylindrical pillar, and mossy stone base",
+        "primitives": [
+          {
+            "op": "smooth_union",
+            "k": 0.14,
+            "shape": "cylinder",
+            "center": [
+              0.0,
+              -0.65,
+              0.0
+            ],
+            "size": [
+              0.48,
+              0.22,
+              0.48
+            ],
+            "end": null,
+            "rot_deg": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "mirror_x": false
+          },
+          {
+            "op": "smooth_union",
+            "k": 0.16,
+            "shape": "cylinder",
+            "center": [
+              0.0,
+              -0.15,
+              0.0
+            ],
+            "size": [
+              0.2,
+              0.42,
+              0.2
+            ],
+            "end": null,
+            "rot_deg": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "mirror_x": false
+          },
+          {
+            "op": "smooth_union",
+            "k": 0.12,
+            "shape": "cylinder",
+            "center": [
+              0.0,
+              0.22,
+              0.0
+            ],
+            "size": [
+              0.38,
+              0.09,
+              0.38
+            ],
+            "end": null,
+            "rot_deg": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "mirror_x": false
+          },
+          {
+            "op": "smooth_union",
+            "k": 0.1,
+            "shape": "round_box",
+            "center": [
+              0.0,
+              0.44,
+              0.0
+            ],
+            "size": [
+              0.26,
+              0.2,
+              0.26
+            ],
+            "end": null,
+            "rot_deg": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "mirror_x": false
+          },
+          {
+            "op": "smooth_subtract",
+            "k": 0.06,
+            "shape": "round_box",
+            "center": [
+              0.0,
+              0.44,
+              0.0
+            ],
+            "size": [
+              0.14,
+              0.12,
+              0.34
+            ],
+            "end": null,
+            "rot_deg": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "mirror_x": false
+          },
+          {
+            "op": "smooth_subtract",
+            "k": 0.06,
+            "shape": "round_box",
+            "center": [
+              0.0,
+              0.44,
+              0.0
+            ],
+            "size": [
+              0.34,
+              0.12,
+              0.14
+            ],
+            "end": null,
+            "rot_deg": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "mirror_x": false
+          },
+          {
+            "op": "smooth_union",
+            "k": 0.18,
+            "shape": "cone",
+            "center": [
+              0.0,
+              0.74,
+              0.0
+            ],
+            "size": [
+              0.56,
+              0.24,
+              0.56
+            ],
+            "end": null,
+            "rot_deg": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "mirror_x": false
+          },
+          {
+            "op": "smooth_union",
+            "k": 0.14,
+            "shape": "sphere",
+            "center": [
+              0.0,
+              0.92,
+              0.0
+            ],
+            "size": [
+              0.12,
+              0.15,
+              0.12
+            ],
+            "end": null,
+            "rot_deg": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "mirror_x": false
+          }
+        ],
+        "resolution": 54,
+        "target_height": 2.8,
+        "pedestal": true,
+        "mesh_url": "/world-assets/worlds/w3d_d10a06fe/sdf_stone_lantern_monument_v1_d6e5f.json",
+        "vertex_count": 2456,
+        "face_count": 4920,
+        "baked_front_url": null,
+        "baked_back_url": null,
+        "baked_front_normal_url": null,
+        "baked_back_normal_url": null,
+        "baked_prompt": null
+      },
+      "agent": null,
+      "behavior": {
+        "kind": "none",
+        "target_id": null,
+        "orbit_radius": 6.0,
+        "orbit_height": 5.5,
+        "speed": 0.65,
+        "perch_duration_sec": 3.5,
+        "fly_duration_sec": 7.5,
+        "waypoints_xz": [],
+        "video_track_id": null
+      },
+      "version": 1,
+      "visible": true
+    },
+    {
+      "id": "library",
+      "name": "Campus Library",
+      "collection": "architecture",
+      "carrier": "parametric_assembly",
+      "position": [
+        -10.5,
+        0.0,
+        -13.5
+      ],
+      "rotation_y_deg": 0.0,
+      "scale": 1.0,
+      "material": {
+        "color": "#2e2c2a",
+        "secondary_color": "#3a3f42",
+        "accent_color": "#e09b3d",
+        "roughness": 0.78,
+        "metalness": 0.08,
+        "emissive": "#e09b3d",
+        "emissive_intensity": 0.65,
+        "texture_id": "charred_timber",
+        "roof_texture_id": "slate_roof_tile",
+        "texture_repeat": 3.0
+      },
+      "parametric": {
+        "kind": "building",
+        "width": 12.5,
+        "height": 6.8,
+        "depth": 7.0,
+        "floors": 2,
+        "roof_style": "gable",
+        "tree_style": "oak",
+        "seed": 202,
+        "has_balcony": true,
+        "has_chimney": false,
+        "light_on": true
+      },
+      "implicit_sdf": null,
+      "agent": null,
+      "behavior": {
+        "kind": "none",
+        "target_id": null,
+        "orbit_radius": 6.0,
+        "orbit_height": 5.5,
+        "speed": 0.65,
+        "perch_duration_sec": 3.5,
+        "fly_duration_sec": 7.5,
+        "waypoints_xz": [],
+        "video_track_id": null
+      },
+      "version": 1,
+      "visible": true
+    },
+    {
+      "id": "studio_hall",
+      "name": "Studio Hall",
+      "collection": "architecture",
+      "carrier": "parametric_assembly",
+      "position": [
+        10.5,
+        0.0,
+        -14.0
+      ],
+      "rotation_y_deg": 0.0,
+      "scale": 1.0,
+      "material": {
+        "color": "#322e2b",
+        "secondary_color": "#3c4345",
+        "accent_color": "#e09b3d",
+        "roughness": 0.76,
+        "metalness": 0.1,
+        "emissive": "#e09b3d",
+        "emissive_intensity": 0.65,
+        "texture_id": "charred_timber",
+        "roof_texture_id": "slate_roof_tile",
+        "texture_repeat": 3.0
+      },
+      "parametric": {
+        "kind": "building",
+        "width": 12.5,
+        "height": 6.4,
+        "depth": 6.5,
+        "floors": 2,
+        "roof_style": "hip",
+        "tree_style": "oak",
+        "seed": 303,
+        "has_balcony": true,
+        "has_chimney": true,
+        "light_on": true
+      },
+      "implicit_sdf": null,
+      "agent": null,
+      "behavior": {
+        "kind": "none",
+        "target_id": null,
+        "orbit_radius": 6.0,
+        "orbit_height": 5.5,
+        "speed": 0.65,
+        "perch_duration_sec": 3.5,
+        "fly_duration_sec": 7.5,
+        "waypoints_xz": [],
+        "video_track_id": null
+      },
+      "version": 1,
+      "visible": true
+    },
+    {
+      "id": "cafe",
+      "name": "Riverside Tea & Coffee House",
+      "collection": "architecture",
+      "carrier": "parametric_assembly",
+      "position": [
+        -14.5,
+        0.0,
+        3.5
+      ],
+      "rotation_y_deg": 90.0,
+      "scale": 1.0,
+      "material": {
+        "color": "#352c26",
+        "secondary_color": "#5e7d7e",
+        "accent_color": "#e8a243",
+        "roughness": 0.74,
+        "metalness": 0.12,
+        "emissive": "#e8a243",
+        "emissive_intensity": 0.8,
+        "texture_id": "charred_timber",
+        "roof_texture_id": "slate_roof_tile",
+        "texture_repeat": 2.5
+      },
+      "parametric": {
+        "kind": "building",
+        "width": 10.0,
+        "height": 5.6,
+        "depth": 7.5,
+        "floors": 2,
+        "roof_style": "gable",
+        "tree_style": "oak",
+        "seed": 404,
+        "has_balcony": true,
+        "has_chimney": true,
+        "light_on": true
+      },
+      "implicit_sdf": null,
+      "agent": null,
+      "behavior": {
+        "kind": "none",
+        "target_id": null,
+        "orbit_radius": 6.0,
+        "orbit_height": 5.5,
+        "speed": 0.65,
+        "perch_duration_sec": 3.5,
+        "fly_duration_sec": 7.5,
+        "waypoints_xz": [],
+        "video_track_id": null
+      },
+      "version": 1,
+      "visible": true
+    },
+    {
+      "id": "tower",
+      "name": "Pagoda Bell Tower",
+      "collection": "architecture",
+      "carrier": "parametric_assembly",
+      "position": [
+        14.0,
+        0.0,
+        2.5
+      ],
+      "rotation_y_deg": -90.0,
+      "scale": 1.0,
+      "material": {
+        "color": "#2c2a29",
+        "secondary_color": "#3a4446",
+        "accent_color": "#e09b3d",
+        "roughness": 0.75,
+        "metalness": 0.1,
+        "emissive": "#e09b3d",
+        "emissive_intensity": 0.6,
+        "texture_id": "charred_timber",
+        "roof_texture_id": "slate_roof_tile",
+        "texture_repeat": 3.5
+      },
+      "parametric": {
+        "kind": "tower",
+        "width": 7.2,
+        "height": 14.5,
+        "depth": 7.2,
+        "floors": 4,
+        "roof_style": "hip",
+        "tree_style": "oak",
+        "seed": 505,
+        "has_balcony": true,
+        "has_chimney": false,
+        "light_on": true
+      },
+      "implicit_sdf": null,
+      "agent": null,
+      "behavior": {
+        "kind": "none",
+        "target_id": null,
+        "orbit_radius": 6.0,
+        "orbit_height": 5.5,
+        "speed": 0.65,
+        "perch_duration_sec": 3.5,
+        "fly_duration_sec": 7.5,
+        "waypoints_xz": [],
+        "video_track_id": null
+      },
+      "version": 1,
+      "visible": true
+    },
+    {
+      "id": "riverside_bridge",
+      "name": "Main Path Footbridge",
+      "collection": "landmarks",
+      "carrier": "parametric_assembly",
+      "position": [
+        0.0,
+        0.0,
+        17.5
+      ],
+      "rotation_y_deg": 0.0,
+      "scale": 1.0,
+      "material": {
+        "color": "#242623",
+        "secondary_color": "#6d7c50",
+        "accent_color": "#b66033",
+        "roughness": 0.32,
+        "metalness": 0.06,
+        "emissive": "#000000",
+        "emissive_intensity": 0.0,
+        "texture_id": "weathered_wet_maple_wood",
+        "roof_texture_id": null,
+        "texture_repeat": 2.5
+      },
+      "parametric": {
+        "kind": "bridge",
+        "width": 4.2,
+        "height": 2.6,
+        "depth": 9.0,
+        "floors": 1,
+        "roof_style": "flat",
+        "tree_style": "oak",
+        "seed": 606,
+        "has_balcony": false,
+        "has_chimney": false,
+        "light_on": true
+      },
+      "implicit_sdf": null,
+      "agent": null,
+      "behavior": {
+        "kind": "none",
+        "target_id": null,
+        "orbit_radius": 6.0,
+        "orbit_height": 5.5,
+        "speed": 0.65,
+        "perch_duration_sec": 3.5,
+        "fly_duration_sec": 7.5,
+        "waypoints_xz": [],
+        "video_track_id": null
+      },
+      "version": 2,
+      "visible": true
+    },
+    {
+      "id": "tea_stall",
+      "name": "Roasted Chestnut & Tea Stall",
+      "collection": "props",
+      "carrier": "parametric_assembly",
+      "position": [
+        -7.5,
+        0.0,
+        5.5
+      ],
+      "rotation_y_deg": 65.0,
+      "scale": 1.0,
+      "material": {
+        "color": "#3a2e26",
+        "secondary_color": "#8f262a",
+        "accent_color": "#e09b3d",
+        "roughness": 0.75,
+        "metalness": 0.08,
+        "emissive": "#e09b3d",
+        "emissive_intensity": 0.6,
+        "texture_id": "charred_timber",
+        "roof_texture_id": null,
+        "texture_repeat": 1.5
+      },
+      "parametric": {
+        "kind": "market_stall",
+        "width": 3.4,
+        "height": 3.0,
+        "depth": 2.6,
+        "floors": 1,
+        "roof_style": "gable",
+        "tree_style": "oak",
+        "seed": 707,
+        "has_balcony": false,
+        "has_chimney": false,
+        "light_on": true
+      },
+      "implicit_sdf": null,
+      "agent": null,
+      "behavior": {
+        "kind": "none",
+        "target_id": null,
+        "orbit_radius": 6.0,
+        "orbit_height": 5.5,
+        "speed": 0.65,
+        "perch_duration_sec": 3.5,
+        "fly_duration_sec": 7.5,
+        "waypoints_xz": [],
+        "video_track_id": null
+      },
+      "version": 1,
+      "visible": true
+    },
+    {
+      "id": "maple_tree_nw_outer",
+      "name": "West Crimson Maple",
+      "collection": "nature",
+      "carrier": "parametric_assembly",
+      "position": [
+        -19.5,
+        0.0,
+        -6.5
+      ],
+      "rotation_y_deg": 25.0,
+      "scale": 1.15,
+      "material": {
+        "color": "#423229",
+        "secondary_color": "#8f262a",
+        "accent_color": "#b66033",
+        "roughness": 0.85,
+        "metalness": 0.02,
+        "emissive": "#000000",
+        "emissive_intensity": 0.0,
+        "texture_id": null,
+        "roof_texture_id": null,
+        "texture_repeat": 1.0
+      },
+      "parametric": {
+        "kind": "tree",
+        "width": 5.5,
+        "height": 7.5,
+        "depth": 5.5,
+        "floors": 1,
+        "roof_style": "gable",
+        "tree_style": "blossom",
+        "seed": 801,
+        "has_balcony": false,
+        "has_chimney": false,
+        "light_on": false
+      },
+      "implicit_sdf": null,
+      "agent": null,
+      "behavior": {
+        "kind": "sway_wind",
+        "target_id": null,
+        "orbit_radius": 6.0,
+        "orbit_height": 5.5,
+        "speed": 0.5,
+        "perch_duration_sec": 3.5,
+        "fly_duration_sec": 7.5,
+        "waypoints_xz": [],
+        "video_track_id": null
+      },
+      "version": 1,
+      "visible": true
+    },
+    {
+      "id": "maple_tree_nw_inner",
+      "name": "Library Courtyard Maple",
+      "collection": "nature",
+      "carrier": "parametric_assembly",
+      "position": [
+        -7.5,
+        0.0,
+        -6.5
+      ],
+      "rotation_y_deg": 110.0,
+      "scale": 1.05,
+      "material": {
+        "color": "#3f3028",
+        "secondary_color": "#96292d",
+        "accent_color": "#e09b3d",
+        "roughness": 0.85,
+        "metalness": 0.02,
+        "emissive": "#000000",
+        "emissive_intensity": 0.0,
+        "texture_id": null,
+        "roof_texture_id": null,
+        "texture_repeat": 1.0
+      },
+      "parametric": {
+        "kind": "tree",
+        "width": 5.0,
+        "height": 6.8,
+        "depth": 5.0,
+        "floors": 1,
+        "roof_style": "gable",
+        "tree_style": "blossom",
+        "seed": 802,
+        "has_balcony": false,
+        "has_chimney": false,
+        "light_on": false
+      },
+      "implicit_sdf": null,
+      "agent": null,
+      "behavior": {
+        "kind": "sway_wind",
+        "target_id": null,
+        "orbit_radius": 6.0,
+        "orbit_height": 5.5,
+        "speed": 0.55,
+        "perch_duration_sec": 3.5,
+        "fly_duration_sec": 7.5,
+        "waypoints_xz": [],
+        "video_track_id": null
+      },
+      "version": 1,
+      "visible": true
+    },
+    {
+      "id": "maple_tree_ne_inner",
+      "name": "Studio Courtyard Maple",
+      "collection": "nature",
+      "carrier": "parametric_assembly",
+      "position": [
+        7.5,
+        0.0,
+        -6.5
+      ],
+      "rotation_y_deg": 210.0,
+      "scale": 1.05,
+      "material": {
+        "color": "#423229",
+        "secondary_color": "#b66033",
+        "accent_color": "#8f262a",
+        "roughness": 0.85,
+        "metalness": 0.02,
+        "emissive": "#000000",
+        "emissive_intensity": 0.0,
+        "texture_id": null,
+        "roof_texture_id": null,
+        "texture_repeat": 1.0
+      },
+      "parametric": {
+        "kind": "tree",
+        "width": 5.2,
+        "height": 7.0,
+        "depth": 5.2,
+        "floors": 1,
+        "roof_style": "gable",
+        "tree_style": "oak",
+        "seed": 803,
+        "has_balcony": false,
+        "has_chimney": false,
+        "light_on": false
+      },
+      "implicit_sdf": null,
+      "agent": null,
+      "behavior": {
+        "kind": "sway_wind",
+        "target_id": null,
+        "orbit_radius": 6.0,
+        "orbit_height": 5.5,
+        "speed": 0.5,
+        "perch_duration_sec": 3.5,
+        "fly_duration_sec": 7.5,
+        "waypoints_xz": [],
+        "video_track_id": null
+      },
+      "version": 1,
+      "visible": true
+    },
+    {
+      "id": "pine_tree_ne_outer",
+      "name": "East Mountain Pine",
+      "collection": "nature",
+      "carrier": "parametric_assembly",
+      "position": [
+        19.0,
+        0.0,
+        -8.0
+      ],
+      "rotation_y_deg": 45.0,
+      "scale": 1.2,
+      "material": {
+        "color": "#3b2e25",
+        "secondary_color": "#586644",
+        "accent_color": "#6d7c50",
+        "roughness": 0.88,
+        "metalness": 0.02,
+        "emissive": "#000000",
+        "emissive_intensity": 0.0,
+        "texture_id": null,
+        "roof_texture_id": null,
+        "texture_repeat": 1.0
+      },
+      "parametric": {
+        "kind": "tree",
+        "width": 5.0,
+        "height": 8.8,
+        "depth": 5.0,
+        "floors": 1,
+        "roof_style": "gable",
+        "tree_style": "pine",
+        "seed": 804,
+        "has_balcony": false,
+        "has_chimney": false,
+        "light_on": false
+      },
+      "implicit_sdf": null,
+      "agent": null,
+      "behavior": {
+        "kind": "sway_wind",
+        "target_id": null,
+        "orbit_radius": 6.0,
+        "orbit_height": 5.5,
+        "speed": 0.45,
+        "perch_duration_sec": 3.5,
+        "fly_duration_sec": 7.5,
+        "waypoints_xz": [],
+        "video_track_id": null
+      },
+      "version": 1,
+      "visible": true
+    },
+    {
+      "id": "maple_tree_sw",
+      "name": "Riverside Amber Maple",
+      "collection": "nature",
+      "carrier": "parametric_assembly",
+      "position": [
+        -6.5,
+        0.0,
+        10.0
+      ],
+      "rotation_y_deg": 155.0,
+      "scale": 1.1,
+      "material": {
+        "color": "#3f3028",
+        "secondary_color": "#8f262a",
+        "accent_color": "#e09b3d",
+        "roughness": 0.85,
+        "metalness": 0.02,
+        "emissive": "#000000",
+        "emissive_intensity": 0.0,
+        "texture_id": null,
+        "roof_texture_id": null,
+        "texture_repeat": 1.0
+      },
+      "parametric": {
+        "kind": "tree",
+        "width": 5.4,
+        "height": 7.2,
+        "depth": 5.4,
+        "floors": 1,
+        "roof_style": "gable",
+        "tree_style": "blossom",
+        "seed": 805,
+        "has_balcony": false,
+        "has_chimney": false,
+        "light_on": false
+      },
+      "implicit_sdf": null,
+      "agent": null,
+      "behavior": {
+        "kind": "sway_wind",
+        "target_id": null,
+        "orbit_radius": 6.0,
+        "orbit_height": 5.5,
+        "speed": 0.55,
+        "perch_duration_sec": 3.5,
+        "fly_duration_sec": 7.5,
+        "waypoints_xz": [],
+        "video_track_id": null
+      },
+      "version": 1,
+      "visible": true
+    },
+    {
+      "id": "maple_tree_se",
+      "name": "Riverside Copper Oak",
+      "collection": "nature",
+      "carrier": "parametric_assembly",
+      "position": [
+        6.5,
+        0.0,
+        10.5
+      ],
+      "rotation_y_deg": 295.0,
+      "scale": 1.1,
+      "material": {
+        "color": "#3f3028",
+        "secondary_color": "#b66033",
+        "accent_color": "#e09b3d",
+        "roughness": 0.85,
+        "metalness": 0.02,
+        "emissive": "#000000",
+        "emissive_intensity": 0.0,
+        "texture_id": null,
+        "roof_texture_id": null,
+        "texture_repeat": 1.0
+      },
+      "parametric": {
+        "kind": "tree",
+        "width": 5.4,
+        "height": 7.2,
+        "depth": 5.4,
+        "floors": 1,
+        "roof_style": "gable",
+        "tree_style": "oak",
+        "seed": 806,
+        "has_balcony": false,
+        "has_chimney": false,
+        "light_on": false
+      },
+      "implicit_sdf": null,
+      "agent": null,
+      "behavior": {
+        "kind": "sway_wind",
+        "target_id": null,
+        "orbit_radius": 6.0,
+        "orbit_height": 5.5,
+        "speed": 0.5,
+        "perch_duration_sec": 3.5,
+        "fly_duration_sec": 7.5,
+        "waypoints_xz": [],
+        "video_track_id": null
+      },
+      "version": 1,
+      "visible": true
+    },
+    {
+      "id": "bench_courtyard_west",
+      "name": "Cafe Hangout Timber Bench",
+      "collection": "props",
+      "carrier": "parametric_assembly",
+      "position": [
+        -5.6,
+        0.0,
+        1.0
+      ],
+      "rotation_y_deg": 90.0,
+      "scale": 1.0,
+      "material": {
+        "color": "#2d2a28",
+        "secondary_color": "#608b8c",
+        "accent_color": "#8f262a",
+        "roughness": 0.68,
+        "metalness": 0.15,
+        "emissive": "#000000",
+        "emissive_intensity": 0.0,
+        "texture_id": "charred_timber",
+        "roof_texture_id": null,
+        "texture_repeat": 1.5
+      },
+      "parametric": {
+        "kind": "bench",
+        "width": 2.2,
+        "height": 0.95,
+        "depth": 0.85,
+        "floors": 1,
+        "roof_style": "flat",
+        "tree_style": "oak",
+        "seed": 901,
+        "has_balcony": false,
+        "has_chimney": false,
+        "light_on": false
+      },
+      "implicit_sdf": null,
+      "agent": null,
+      "behavior": {
+        "kind": "none",
+        "target_id": null,
+        "orbit_radius": 6.0,
+        "orbit_height": 5.5,
+        "speed": 0.65,
+        "perch_duration_sec": 3.5,
+        "fly_duration_sec": 7.5,
+        "waypoints_xz": [],
+        "video_track_id": null
+      },
+      "version": 1,
+      "visible": true
+    },
+    {
+      "id": "bench_courtyard_east",
+      "name": "Tower View Timber Bench",
+      "collection": "props",
+      "carrier": "parametric_assembly",
+      "position": [
+        5.6,
+        0.0,
+        1.0
+      ],
+      "rotation_y_deg": -90.0,
+      "scale": 1.0,
+      "material": {
+        "color": "#2d2a28",
+        "secondary_color": "#608b8c",
+        "accent_color": "#b66033",
+        "roughness": 0.68,
+        "metalness": 0.15,
+        "emissive": "#000000",
+        "emissive_intensity": 0.0,
+        "texture_id": "charred_timber",
+        "roof_texture_id": null,
+        "texture_repeat": 1.5
+      },
+      "parametric": {
+        "kind": "bench",
+        "width": 2.2,
+        "height": 0.95,
+        "depth": 0.85,
+        "floors": 1,
+        "roof_style": "flat",
+        "tree_style": "oak",
+        "seed": 902,
+        "has_balcony": false,
+        "has_chimney": false,
+        "light_on": false
+      },
+      "implicit_sdf": null,
+      "agent": null,
+      "behavior": {
+        "kind": "none",
+        "target_id": null,
+        "orbit_radius": 6.0,
+        "orbit_height": 5.5,
+        "speed": 0.65,
+        "perch_duration_sec": 3.5,
+        "fly_duration_sec": 7.5,
+        "waypoints_xz": [],
+        "video_track_id": null
+      },
+      "version": 1,
+      "visible": true
+    },
+    {
+      "id": "lantern_path_north_w",
+      "name": "North Path Amber Lantern",
+      "collection": "lighting",
+      "carrier": "parametric_assembly",
+      "position": [
+        -2.4,
+        0.0,
+        -8.5
+      ],
+      "rotation_y_deg": 0.0,
+      "scale": 1.0,
+      "material": {
+        "color": "#2d2a28",
+        "secondary_color": "#608b8c",
+        "accent_color": "#e09b3d",
+        "roughness": 0.65,
+        "metalness": 0.25,
+        "emissive": "#e09b3d",
+        "emissive_intensity": 1.4,
+        "texture_id": null,
+        "roof_texture_id": null,
+        "texture_repeat": 1.0
+      },
+      "parametric": {
+        "kind": "lamp_post",
+        "width": 0.8,
+        "height": 3.6,
+        "depth": 0.8,
+        "floors": 1,
+        "roof_style": "gable",
+        "tree_style": "oak",
+        "seed": 911,
+        "has_balcony": false,
+        "has_chimney": false,
+        "light_on": true
+      },
+      "implicit_sdf": null,
+      "agent": null,
+      "behavior": {
+        "kind": "none",
+        "target_id": null,
+        "orbit_radius": 6.0,
+        "orbit_height": 5.5,
+        "speed": 0.65,
+        "perch_duration_sec": 3.5,
+        "fly_duration_sec": 7.5,
+        "waypoints_xz": [],
+        "video_track_id": null
+      },
+      "version": 1,
+      "visible": true
+    },
+    {
+      "id": "lantern_path_south_e",
+      "name": "Main Path Riverside Lantern",
+      "collection": "lighting",
+      "carrier": "parametric_assembly",
+      "position": [
+        2.4,
+        0.0,
+        9.5
+      ],
+      "rotation_y_deg": 0.0,
+      "scale": 1.0,
+      "material": {
+        "color": "#2d2a28",
+        "secondary_color": "#608b8c",
+        "accent_color": "#e09b3d",
+        "roughness": 0.65,
+        "metalness": 0.25,
+        "emissive": "#e09b3d",
+        "emissive_intensity": 1.4,
+        "texture_id": null,
+        "roof_texture_id": null,
+        "texture_repeat": 1.0
+      },
+      "parametric": {
+        "kind": "lamp_post",
+        "width": 0.8,
+        "height": 3.6,
+        "depth": 0.8,
+        "floors": 1,
+        "roof_style": "gable",
+        "tree_style": "oak",
+        "seed": 912,
+        "has_balcony": false,
+        "has_chimney": false,
+        "light_on": true
+      },
+      "implicit_sdf": null,
+      "agent": null,
+      "behavior": {
+        "kind": "none",
+        "target_id": null,
+        "orbit_radius": 6.0,
+        "orbit_height": 5.5,
+        "speed": 0.65,
+        "perch_duration_sec": 3.5,
+        "fly_duration_sec": 7.5,
+        "waypoints_xz": [],
+        "video_track_id": null
+      },
+      "version": 1,
+      "visible": true
+    },
+    {
+      "id": "lantern_cafe_front",
+      "name": "Cafe Eaves Lantern Post",
+      "collection": "lighting",
+      "carrier": "parametric_assembly",
+      "position": [
+        -8.8,
+        0.0,
+        1.5
+      ],
+      "rotation_y_deg": 90.0,
+      "scale": 1.0,
+      "material": {
+        "color": "#2d2a28",
+        "secondary_color": "#b66033",
+        "accent_color": "#e09b3d",
+        "roughness": 0.65,
+        "metalness": 0.25,
+        "emissive": "#e09b3d",
+        "emissive_intensity": 1.4,
+        "texture_id": null,
+        "roof_texture_id": null,
+        "texture_repeat": 1.0
+      },
+      "parametric": {
+        "kind": "lamp_post",
+        "width": 0.8,
+        "height": 3.5,
+        "depth": 0.8,
+        "floors": 1,
+        "roof_style": "gable",
+        "tree_style": "oak",
+        "seed": 913,
+        "has_balcony": false,
+        "has_chimney": false,
+        "light_on": true
+      },
+      "implicit_sdf": null,
+      "agent": null,
+      "behavior": {
+        "kind": "none",
+        "target_id": null,
+        "orbit_radius": 6.0,
+        "orbit_height": 5.5,
+        "speed": 0.65,
+        "perch_duration_sec": 3.5,
+        "fly_duration_sec": 7.5,
+        "waypoints_xz": [],
+        "video_track_id": null
+      },
+      "version": 1,
+      "visible": true
+    },
+    {
+      "id": "campus_birds",
+      "name": "Tower Perching Autumn Sparrows",
+      "collection": "agents",
+      "carrier": "articulated_agent",
+      "position": [
+        14.0,
+        8.0,
+        2.5
+      ],
+      "rotation_y_deg": 0.0,
+      "scale": 1.0,
+      "material": {
+        "color": "#594032",
+        "secondary_color": "#b66033",
+        "accent_color": "#e09b3d",
+        "roughness": 0.8,
+        "metalness": 0.0,
+        "emissive": "#000000",
+        "emissive_intensity": 0.0,
+        "texture_id": null,
+        "roof_texture_id": null,
+        "texture_repeat": 1.0
+      },
+      "parametric": null,
+      "implicit_sdf": null,
+      "agent": {
+        "rig_kind": "bird_flock",
+        "count": 7,
+        "entity_scale": 0.95
+      },
+      "behavior": {
+        "kind": "orbit_and_perch",
+        "target_id": "tower",
+        "orbit_radius": 8.5,
+        "orbit_height": 11.5,
+        "speed": 0.85,
+        "perch_duration_sec": 4.5,
+        "fly_duration_sec": 8.5,
+        "waypoints_xz": [],
+        "video_track_id": null
+      },
+      "version": 1,
+      "visible": true
+    },
+    {
+      "id": "courtyard_lanterns",
+      "name": "Drifting Amber Paper Lanterns",
+      "collection": "agents",
+      "carrier": "articulated_agent",
+      "position": [
+        0.0,
+        3.2,
+        1.0
+      ],
+      "rotation_y_deg": 0.0,
+      "scale": 1.0,
+      "material": {
+        "color": "#e09b3d",
+        "secondary_color": "#b66033",
+        "accent_color": "#fff2cc",
+        "roughness": 0.4,
+        "metalness": 0.0,
+        "emissive": "#e09b3d",
+        "emissive_intensity": 1.8,
+        "texture_id": null,
+        "roof_texture_id": null,
+        "texture_repeat": 1.0
+      },
+      "parametric": null,
+      "implicit_sdf": null,
+      "agent": {
+        "rig_kind": "floating_lanterns",
+        "count": 8,
+        "entity_scale": 0.85
+      },
+      "behavior": {
+        "kind": "orbit_target",
+        "target_id": "courtyard_pond",
+        "orbit_radius": 6.8,
+        "orbit_height": 4.5,
+        "speed": 0.28,
+        "perch_duration_sec": 3.5,
+        "fly_duration_sec": 7.5,
+        "waypoints_xz": [],
+        "video_track_id": null
+      },
+      "version": 1,
+      "visible": true
+    },
+    {
+      "id": "campus_scooter",
+      "name": "Student Evening Scooter",
+      "collection": "agents",
+      "carrier": "articulated_agent",
+      "position": [
+        0.0,
+        0.0,
+        7.5
+      ],
+      "rotation_y_deg": 90.0,
+      "scale": 0.95,
+      "material": {
+        "color": "#608b8c",
+        "secondary_color": "#2d2a28",
+        "accent_color": "#e09b3d",
+        "roughness": 0.5,
+        "metalness": 0.3,
+        "emissive": "#e09b3d",
+        "emissive_intensity": 0.5,
+        "texture_id": null,
+        "roof_texture_id": null,
+        "texture_repeat": 1.0
+      },
+      "parametric": null,
+      "implicit_sdf": null,
+      "agent": {
+        "rig_kind": "scooter_rider",
+        "count": 1,
+        "entity_scale": 0.95
+      },
+      "behavior": {
+        "kind": "patrol_ring",
+        "target_id": "courtyard_pond",
+        "orbit_radius": 8.2,
+        "orbit_height": 0.5,
+        "speed": 0.7,
+        "perch_duration_sec": 3.5,
+        "fly_duration_sec": 7.5,
+        "waypoints_xz": [],
+        "video_track_id": null
+      },
+      "version": 1,
+      "visible": true
+    }
+  ],
+  "revision": 2,
+  "history": [
+    {
+      "revision": 1,
+      "action": "create_world",
+      "instruction": "A small riverside campus where students hang out in autumn",
+      "carbon_summary": "A tranquil, Kyoto-inspired autumn riverside campus arranged around a central courtyard pond, with charred timber academic halls, glowing amber lanterns, crimson maples, and a riverside bridge.",
+      "changed_object_ids": [
+        "courtyard_pond",
+        "stone_lantern_monument",
+        "library",
+        "studio_hall",
+        "cafe",
+        "tower",
+        "riverside_bridge",
+        "tea_stall",
+        "maple_tree_nw_outer",
+        "maple_tree_nw_inner",
+        "maple_tree_ne_inner",
+        "pine_tree_ne_outer",
+        "maple_tree_sw",
+        "maple_tree_se",
+        "bench_courtyard_west",
+        "bench_courtyard_east",
+        "lantern_path_north_w",
+        "lantern_path_south_e",
+        "lantern_cafe_front",
+        "campus_birds",
+        "courtyard_lanterns",
+        "campus_scooter"
+      ],
+      "unchanged_object_ids": [],
+      "rebuilt_entire_world": true,
+      "costs": {
+        "carbon_calls": 1,
+        "hydrogen_calls": 0,
+        "nano_banana_texture_calls": 3,
+        "sdf_meshes_compiled": 1
+      },
+      "timings": {
+        "carbon_ms": 82250.2,
+        "nano_banana_ms": 12015.1,
+        "sdf_compile_ms": 22.3,
+        "hydrogen_ms": 0.0,
+        "total_ms": 94323.0
+      },
+      "audit": null,
+      "reference_usage": [
+        {
+          "image_index": 0,
+          "role": "site_or_floor_plan",
+          "how_used": "Mapped directly at ~5m per grid cell with North as -Z: placed the Courtyard Pond at the origin, Library (-10.5, -13.5) and Studio Hall (10.5, -14.0) to the north, Cafe (-14.5, 3.5) on the west, Tower (14.0, 2.5) on the east, the 6 drawn trees at their corresponding grid spots, and a footbridge along the north-south main path meeting the southern river.",
+          "affected_object_ids": [
+            "courtyard_pond",
+            "library",
+            "studio_hall",
+            "cafe",
+            "tower",
+            "riverside_bridge",
+            "maple_tree_nw_outer",
+            "maple_tree_nw_inner",
+            "maple_tree_ne_inner",
+            "pine_tree_ne_outer",
+            "maple_tree_sw",
+            "maple_tree_se"
+          ]
+        },
+        {
+          "image_index": 1,
+          "role": "mood_board",
+          "how_used": "Applied the misty Japanese autumn dusk atmosphere, extracted the six-swatch palette (charred timber, maple red, amber glow, moss green, patina teal, burnt copper) across all structures and trees, generated wet flagstone and charred cedar PBR textures, and added a carved stone toro lantern monument plus glowing amber lanterns.",
+          "affected_object_ids": [
+            "stone_lantern_monument",
+            "library",
+            "studio_hall",
+            "cafe",
+            "tower",
+            "tea_stall",
+            "bench_courtyard_west",
+            "bench_courtyard_east",
+            "lantern_path_north_w",
+            "lantern_path_south_e",
+            "lantern_cafe_front",
+            "courtyard_lanterns"
+          ]
+        }
+      ]
+    },
+    {
+      "revision": 2,
+      "action": "restyle_material",
+      "instruction": "use this weathered wet wood for the footbridge",
+      "carbon_summary": "Applied the dark weathered wet wood plank texture with scattered crimson and copper autumn maple leaves and mossy edges from the reference swatch to the Main Path Footbridge.",
+      "changed_object_ids": [
+        "riverside_bridge"
+      ],
+      "unchanged_object_ids": [
+        "courtyard_pond",
+        "stone_lantern_monument",
+        "library",
+        "studio_hall",
+        "cafe",
+        "tower",
+        "tea_stall",
+        "maple_tree_nw_outer",
+        "maple_tree_nw_inner",
+        "maple_tree_ne_inner",
+        "pine_tree_ne_outer",
+        "maple_tree_sw",
+        "maple_tree_se",
+        "bench_courtyard_west",
+        "bench_courtyard_east",
+        "lantern_path_north_w",
+        "lantern_path_south_e",
+        "lantern_cafe_front",
+        "campus_birds",
+        "courtyard_lanterns",
+        "campus_scooter"
+      ],
+      "rebuilt_entire_world": false,
+      "costs": {
+        "carbon_calls": 1,
+        "hydrogen_calls": 0,
+        "nano_banana_texture_calls": 1,
+        "sdf_meshes_compiled": 0
+      },
+      "timings": {
+        "carbon_ms": 6407.6,
+        "nano_banana_ms": 17722.7,
+        "sdf_compile_ms": 0.0,
+        "hydrogen_ms": 0.0,
+        "total_ms": 24142.7
+      },
+      "audit": null,
+      "reference_usage": [
+        {
+          "image_index": 0,
+          "role": "material_swatch",
+          "how_used": "Extracted the dark rain-soaked weathered wood plank surface with glossy wet grain, mossy edges, and scattered red/amber maple leaves as a custom PBR texture applied to the Main Path Footbridge.",
+          "affected_object_ids": [
+            "riverside_bridge"
+          ]
+        }
+      ]
+    }
+  ],
+  "cumulative_costs": {
+    "carbon_calls": 2,
+    "hydrogen_calls": 0,
+    "nano_banana_texture_calls": 4,
+    "sdf_meshes_compiled": 1
+  },
+  "camera_spawn": [
+    0.0,
+    4.2,
+    23.5
+  ],
+  "camera_look_at": [
+    0.0,
+    2.6,
+    -1.5
+  ],
+  "source_video": null,
+  "style_guide": "Kyoto mountain-town autumn campus aesthetic. Palette: charred timber (#2d2a28), maple red (#8f262a), amber glow (#e09b3d), moss green (#6d7c50), patina teal (#608b8c), and burnt copper (#b66033). Architecture features dark shou-sugi-ban timber walls, slate-tiled pitched roofs, copper/patina trim, and warm glowing shoji-style windows. Wet flagstone walkways, misty dusk atmosphere, mossy stone lanterns, and crimson/copper autumn foliage surround the central pond and southern river.",
+  "reference_images": [
+    {
+      "url": "/world-assets/worlds/w3d_d10a06fe/ref_r1_0.jpg",
+      "filename": "test_site_plan.png",
+      "revision": 1,
+      "image_index": 0,
+      "role": "site_or_floor_plan",
+      "how_used": "Mapped directly at ~5m per grid cell with North as -Z: placed the Courtyard Pond at the origin, Library (-10.5, -13.5) and Studio Hall (10.5, -14.0) to the north, Cafe (-14.5, 3.5) on the west, Tower (14.0, 2.5) on the east, the 6 drawn trees at their corresponding grid spots, and a footbridge along the north-south main path meeting the southern river."
+    },
+    {
+      "url": "/world-assets/worlds/w3d_d10a06fe/ref_r1_1.jpg",
+      "filename": "test_moodboard.jpg",
+      "revision": 1,
+      "image_index": 1,
+      "role": "mood_board",
+      "how_used": "Applied the misty Japanese autumn dusk atmosphere, extracted the six-swatch palette (charred timber, maple red, amber glow, moss green, patina teal, burnt copper) across all structures and trees, generated wet flagstone and charred cedar PBR textures, and added a carved stone toro lantern monument plus glowing amber lanterns."
+    },
+    {
+      "url": "/world-assets/worlds/w3d_d10a06fe/ref_r2_0.jpg",
+      "filename": "test_swatch_wood.jpg",
+      "revision": 2,
+      "image_index": 0,
+      "role": "material_swatch",
+      "how_used": "Extracted the dark rain-soaked weathered wood plank surface with glossy wet grain, mossy edges, and scattered red/amber maple leaves as a custom PBR texture applied to the Main Path Footbridge."
+    }
+  ]
+}
