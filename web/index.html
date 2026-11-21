@@ -1,0 +1,929 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SceneIR Studio — Structured Generative Video</title>
+  <style>
+    :root {
+      --bg: #0b0d12;
+      --surface: #131722;
+      --surface2: #1a2030;
+      --border: #262f45;
+      --text: #eef2ff;
+      --muted: #94a3b8;
+      --accent: #6366f1;
+      --accent-glow: rgba(99, 102, 241, 0.25);
+      --green: #10b981;
+      --amber: #f59e0b;
+      --red: #ef4444;
+      --cyan: #06b6d4;
+      --radius: 12px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(19, 23, 34, 0.9);
+      backdrop-filter: blur(10px);
+      position: sticky;
+      top: 0;
+      z-index: 20;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand-logo {
+      width: 34px; height: 34px; border-radius: 9px;
+      background: linear-gradient(135deg, #6366f1, #06b6d4);
+      display: grid; place-items: center; font-weight: 800; font-size: 16px;
+    }
+    .brand h1 { font-size: 16px; font-weight: 700; letter-spacing: -0.02em; }
+    .brand p { font-size: 12px; color: var(--muted); }
+    .model-pills { display: flex; gap: 8px; flex-wrap: wrap; }
+    .pill {
+      font-size: 11px; padding: 4px 10px; border-radius: 999px;
+      background: var(--surface2); border: 1px solid var(--border); color: #cbd5e1;
+      display: inline-flex; align-items: center; gap: 5px;
+    }
+    .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+    .dot-purple { background: #818cf8; }
+    .dot-amber { background: #fbbf24; }
+    .dot-cyan { background: #22d3ee; }
+    .dot-green { background: #34d399; }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      min-height: calc(100vh - 67px);
+    }
+    aside {
+      border-right: 1px solid var(--border);
+      background: #0f131d;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .nav-tabs { display: flex; gap: 6px; }
+    .nav-tab {
+      flex: 1; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
+      background: var(--surface); color: var(--muted); font-size: 12px; font-weight: 600;
+      cursor: pointer; text-align: center;
+    }
+    .nav-tab.active { background: var(--accent); border-color: var(--accent); color: white; }
+
+    .section-label {
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.08em; color: var(--muted); margin-bottom: 6px;
+    }
+    .project-list { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; flex: 1; }
+    .project-item {
+      padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border);
+      background: var(--surface); cursor: pointer; transition: 0.15s;
+    }
+    .project-item:hover { border-color: #4f5d80; }
+    .project-item.active { border-color: var(--accent); background: rgba(99, 102, 241, 0.12); }
+    .project-item .title { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .project-item .meta { font-size: 11px; color: var(--muted); margin-top: 3px; }
+
+    main { padding: 22px 26px; display: flex; flex-direction: column; gap: 20px; max-width: 1440px; width: 100%; }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px;
+    }
+    .card-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 14px; gap: 12px; flex-wrap: wrap;
+    }
+    .card-title { font-size: 15px; font-weight: 700; }
+
+    textarea, input[type="text"], select {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 9px;
+      padding: 11px 13px;
+      font-family: inherit;
+      font-size: 13.5px;
+      outline: none;
+    }
+    textarea:focus, input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+
+    .btn {
+      padding: 9px 16px; border-radius: 9px; border: none; font-weight: 600;
+      font-size: 13px; cursor: pointer; display: inline-flex; align-items: center; gap: 7px;
+      transition: 0.15s;
+    }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { background: #5254e6; }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+    .btn-secondary:hover { border-color: #4f5d80; }
+    .btn-sm { padding: 6px 11px; font-size: 12px; }
+
+    .presets { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .chip {
+      font-size: 12px; padding: 5px 11px; border-radius: 999px;
+      background: var(--surface2); border: 1px solid var(--border); color: #cbd5e1;
+      cursor: pointer;
+    }
+    .chip:hover { border-color: var(--accent); color: #fff; }
+
+    /* Live Progress Stepper */
+    .stepper {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 12px;
+    }
+    .step-box {
+      padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border);
+      background: var(--bg); font-size: 12px;
+    }
+    .step-box.active { border-color: var(--accent); background: rgba(99, 102, 241, 0.12); }
+    .step-box.done { border-color: rgba(16, 185, 129, 0.5); background: rgba(16, 185, 129, 0.08); }
+    .step-box .s-head { display: flex; justify-content: space-between; font-weight: 600; margin-bottom: 3px; }
+    .step-box .s-sub { color: var(--muted); font-size: 11px; }
+    .live-log {
+      margin-top: 10px; font-size: 12.5px; color: #c7d2fe;
+      padding: 8px 12px; border-radius: 8px; background: rgba(99, 102, 241, 0.1);
+      border: 1px solid rgba(99, 102, 241, 0.25);
+    }
+
+    /* Side by side video comparison */
+    .video-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+    }
+    .video-pane {
+      background: #07090d; border: 1px solid var(--border); border-radius: 11px; overflow: hidden;
+      display: flex; flex-direction: column;
+    }
+    .video-pane-head {
+      padding: 10px 14px; background: var(--surface2); border-bottom: 1px solid var(--border);
+      display: flex; justify-content: space-between; align-items: center; font-size: 12.5px; font-weight: 600;
+    }
+    video { width: 100%; aspect-ratio: 16/9; background: #000; display: block; }
+    .video-pane-foot {
+      padding: 10px 14px; font-size: 12px; color: var(--muted);
+      display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+    }
+
+    /* Metrics Grid */
+    .metrics-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 10px;
+    }
+    .metric {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px;
+    }
+    .metric .m-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+    .metric .m-val { font-size: 24px; font-weight: 800; margin-top: 4px; }
+    .metric .m-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .good { color: #34d399; }
+    .warn { color: #fbbf24; }
+    .bad { color: #f87171; }
+
+    /* References Gallery */
+    .refs-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px;
+    }
+    .ref-card {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+    }
+    .ref-card img { width: 100%; aspect-ratio: 16/10; object-fit: cover; display: block; background: #111; }
+    .ref-card .ref-meta { padding: 9px 10px; font-size: 12px; }
+    .badge {
+      display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 7px;
+      border-radius: 999px; text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .badge-reused { background: rgba(16, 185, 129, 0.18); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
+    .badge-edited { background: rgba(245, 158, 11, 0.18); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); }
+    .badge-created { background: rgba(6, 182, 212, 0.18); color: #22d3ee; border: 1px solid rgba(6, 182, 212, 0.4); }
+    .badge-strategy { background: rgba(99, 102, 241, 0.2); color: #a5b4fc; border: 1px solid rgba(99, 102, 241, 0.4); }
+
+    .version-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .ver-pill {
+      padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border);
+      background: var(--surface2); font-size: 12px; cursor: pointer; color: #cbd5e1;
+    }
+    .ver-pill.active { border-color: var(--accent); background: rgba(99, 102, 241, 0.2); color: #fff; font-weight: 600; }
+
+    /* Scene IR Inspector */
+    .ir-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .ir-block {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px; font-size: 12.5px;
+    }
+    .ir-block h4 { font-size: 11px; text-transform: uppercase; color: var(--muted); letter-spacing: 0.06em; margin-bottom: 8px; }
+    .entity-row {
+      padding: 8px; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); margin-bottom: 8px;
+    }
+    .entity-row.changed { border-color: rgba(245, 158, 11, 0.6); }
+    .entity-row.added { border-color: rgba(6, 182, 212, 0.6); }
+    .entity-row.unchanged { border-color: rgba(16, 185, 129, 0.35); }
+
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+    th { font-size: 11px; text-transform: uppercase; color: var(--muted); letter-spacing: 0.05em; }
+    .hidden { display: none !important; }
+
+    @media (max-width: 980px) {
+      .layout { grid-template-columns: 1fr; }
+      .video-grid, .ir-grid, .stepper { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="brand-logo">IR</div>
+      <div>
+        <h1>Structured Generative Video</h1>
+        <p>Persistent Scene IR + Cached Appearance References + Real Neural Video Synthesis</p>
+      </div>
+    </div>
+    <div class="model-pills">
+      <span class="pill"><span class="dot dot-purple"></span>Gemini 4 Carbon (IR Compiler)</span>
+      <span class="pill"><span class="dot dot-amber"></span>Nano Banana (Ref Cache)</span>
+      <span class="pill"><span class="dot dot-cyan"></span>Gemini Omni 1.2 Flash (Video)</span>
+      <span class="pill"><span class="dot dot-green"></span>Gemini 4 Hydrogen (Auditor)</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside>
+      <div class="nav-tabs">
+        <button class="nav-tab active" id="tabStudio" onclick="switchTab('studio')">Studio</button>
+        <button class="nav-tab" id="tabBench" onclick="switchTab('benchmark')">Benchmark</button>
+      </div>
+      <div>
+        <div class="section-label">Projects</div>
+        <button class="btn btn-primary" style="width:100%; justify-content:center; margin-bottom:10px;" onclick="showNewSceneModal()">
+          + New Unscripted Scene
+        </button>
+      </div>
+      <div class="project-list" id="projectList"></div>
+    </aside>
+
+    <main>
+      <!-- STUDIO VIEW -->
+      <div id="studioView" style="display:flex; flex-direction:column; gap:20px;">
+        <!-- New Scene Composer -->
+        <div class="card" id="composerCard">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Create Any Scene (Unscripted Input)</div>
+              <div style="font-size:12px; color:var(--muted);">Gemini 4 Carbon compiles any prompt into a persistent Scene IR; Nano Banana generates cached references in parallel; Gemini Omni 1.2 Flash synthesizes real 720p video.</div>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <select id="fidelitySelect" style="width:auto; padding:6px 10px; font-size:12px;">
+                <option value="fast">Nano Banana 2 Lite (Fast ~6s)</option>
+                <option value="high">Nano Banana 2.1 (High Fidelity)</option>
+              </select>
+            </div>
+          </div>
+          <textarea id="newPromptInput" rows="3" placeholder="Describe any cinematic scene with characters, setting, actions, and camera motion..."></textarea>
+          <div class="presets">
+            <span class="chip" onclick="usePreset('wedding')">Preset: Cinematic Garden Wedding</span>
+            <span class="chip" onclick="usePreset('ramen')">Preset: Late-Night Tokyo Ramen Kitchen</span>
+            <span class="chip" onclick="usePreset('rover')">Preset: Mars Rover Sunset Dust Storm</span>
+          </div>
+          <div style="margin-top:12px; display:flex; justify-content:flex-end;">
+            <button class="btn btn-primary" id="btnGenerate" onclick="generateNewScene()">Compile Scene IR &amp; Synthesize Video</button>
+          </div>
+        </div>
+
+        <!-- Live Execution Stepper -->
+        <div class="card hidden" id="progressCard">
+          <div class="card-header" style="margin-bottom:6px;">
+            <div class="card-title" id="progressTitle">Running Pipeline...</div>
+            <span class="badge badge-strategy" id="progressElapsed">0.0s</span>
+          </div>
+          <div class="stepper">
+            <div class="step-box" id="step-ir">
+              <div class="s-head"><span>1. Scene IR Ack</span><span id="step-ir-time">—</span></div>
+              <div class="s-sub">Gemini 4 Carbon</div>
+            </div>
+            <div class="step-box" id="step-refs">
+              <div class="s-head"><span>2. Ref Sync</span><span id="step-refs-time">—</span></div>
+              <div class="s-sub">Nano Banana Cache</div>
+            </div>
+            <div class="step-box" id="step-video">
+              <div class="s-head"><span>3. Neural Video</span><span id="step-video-time">—</span></div>
+              <div class="s-sub">Gemini Omni 1.2 Flash</div>
+            </div>
+            <div class="step-box" id="step-eval">
+              <div class="s-head"><span>4. Visual Audit</span><span id="step-eval-time">—</span></div>
+              <div class="s-sub">Gemini 4 Hydrogen</div>
+            </div>
+          </div>
+          <div class="live-log" id="liveLog">Initializing...</div>
+        </div>
+
+        <!-- Active Project Workspace -->
+        <div id="workspace" class="hidden" style="display:flex; flex-direction:column; gap:20px;">
+          <!-- Header & Version Selector -->
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <div class="card-title" id="projTitle">Scene Title</div>
+                <div style="font-size:12.5px; color:var(--muted); margin-top:2px;" id="projInitialPrompt"></div>
+              </div>
+              <div style="display:flex; gap:8px;">
+                <button class="btn btn-secondary btn-sm" onclick="syncPlayBoth()">▶ Sync Play Original &amp; Edited</button>
+              </div>
+            </div>
+            <div class="version-bar" id="versionBar"></div>
+          </div>
+
+          <!-- Natural Language Edit Bar -->
+          <div class="card">
+            <div class="card-header" style="margin-bottom:10px;">
+              <div>
+                <div class="card-title">Edit Scene via Natural Language</div>
+                <div style="font-size:12px; color:var(--muted);">Minimal Scene IR diff (~2s structural ack) + reuses untouched Nano Banana references + neural video editing.</div>
+              </div>
+              <span class="badge badge-strategy" id="editParentBadge">Editing from v1</span>
+            </div>
+            <div style="display:flex; gap:10px;">
+              <input type="text" id="editInput" placeholder="e.g. Change only the bride's dress to emerald green silk / Add guests along the aisle / Pull back to a wide crane shot..." onkeydown="if(event.key==='Enter') runEdit()" />
+              <button class="btn btn-primary" id="btnEdit" onclick="runEdit()">Apply Edit</button>
+            </div>
+            <div class="presets" id="editQuickChips"></div>
+          </div>
+
+          <!-- Side-by-Side Videos -->
+          <div class="video-grid">
+            <div class="video-pane">
+              <div class="video-pane-head">
+                <span id="leftVideoLabel">Original (v1)</span>
+                <span class="badge badge-reused" id="leftVideoTask">reference_to_video</span>
+              </div>
+              <video id="videoOriginal" controls playsinline loop></video>
+              <div class="video-pane-foot" id="leftVideoMeta"></div>
+            </div>
+            <div class="video-pane">
+              <div class="video-pane-head">
+                <span id="rightVideoLabel">Selected Edit</span>
+                <span class="badge badge-strategy" id="rightVideoTask">—</span>
+              </div>
+              <video id="videoEdited" controls playsinline loop></video>
+              <div class="video-pane-foot" id="rightVideoMeta"></div>
+            </div>
+          </div>
+
+          <!-- Hydrogen Visual Consistency & Latency Measurements -->
+          <div class="card" id="metricsCard">
+            <div class="card-header">
+              <div>
+                <div class="card-title">Gemini 4 Hydrogen Audit &amp; Latency Breakdown</div>
+                <div style="font-size:12px; color:var(--muted);" id="evalVerdict">Independent multimodal video audit</div>
+              </div>
+              <span class="badge badge-reused" id="reuseBadge">Ref Reuse: —</span>
+            </div>
+            <div class="metrics-grid" id="metricsGrid"></div>
+            <div id="entityEvalRow" style="margin-top:12px; display:flex; flex-wrap:wrap; gap:8px;"></div>
+          </div>
+
+          <!-- Persistent Appearance References -->
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <div class="card-title">Persistent Appearance Reference Cache (Nano Banana)</div>
+                <div style="font-size:12px; color:var(--muted);">Cached by entity identity &amp; appearance revision. Unchanged references are reused with 0ms latency.</div>
+              </div>
+            </div>
+            <div class="refs-grid" id="refsGrid"></div>
+          </div>
+
+          <!-- Scene IR Inspector -->
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <div class="card-title">Compiled Scene IR (Gemini 4 Carbon)</div>
+                <div style="font-size:12px; color:var(--muted);" id="irDiffSummary">Semantic, spatial, temporal, and appearance structure</div>
+              </div>
+            </div>
+            <div class="ir-grid" id="irInspector"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- BENCHMARK VIEW -->
+      <div id="benchmarkView" class="hidden" style="display:flex; flex-direction:column; gap:20px;">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Structured Generative Video vs. Naive Text-Only Baseline</div>
+              <div style="font-size:12.5px; color:var(--muted);">Measured independently by Gemini 4 Hydrogen on real generated 720p videos across Primary (Wedding) and Secondary (Non-Wedding) scenes.</div>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="loadBenchmark()">Refresh Results</button>
+          </div>
+          <div id="benchmarkContent">Loading benchmark results...</div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const PRESETS = {
+      wedding: "A cinematic golden-hour outdoor wedding in a lush botanical garden: a bride in an ivory lace off-the-shoulder gown and a groom in a tailored charcoal tuxedo stand holding hands beneath a white rose and eucalyptus floral arch as a gentle breeze lifts her sheer veil, with a slow dolly push-in.",
+      ramen: "A cinematic shot inside a cozy late-night Tokyo ramen shop: a focused ramen chef in a dark navy happi coat lifts steaming noodles from a glowing iron pot while warm red lanterns sway outside the rain-streaked window, slow tracking shot left to right.",
+      rover: "A cinematic wide shot of a six-wheeled scientific rover with a glowing cyan camera mast rolling across rust-red Martian canyon terrain at sunset as fine orange dust drifts across the rocky ridge, slow aerial tracking shot."
+    };
+
+    const QUICK_EDITS = {
+      wedding: [
+        "Change only the bride's wedding dress to a rich emerald green satin gown.",
+        "Add warmly dressed wedding guests seated on wooden chairs along both sides of the garden aisle smiling and watching the couple.",
+        "Change camera framing to a wider elevated crane shot pulling gently back to reveal the full floral arch and sunlit garden aisle."
+      ],
+      general: [
+        "Change the main character's outfit color to bright crimson while keeping everything else identical.",
+        "Change the lighting to moody blue twilight with soft glowing lanterns.",
+        "Pull the camera back to a wider establishing shot showing more of the surrounding environment."
+      ]
+    };
+
+    let projects = [];
+    let activeProject = null;
+    let selectedVersionId = null;
+    let timerInterval = null;
+
+    function switchTab(tab) {
+      document.getElementById("tabStudio").classList.toggle("active", tab === "studio");
+      document.getElementById("tabBench").classList.toggle("active", tab === "benchmark");
+      document.getElementById("studioView").classList.toggle("hidden", tab !== "studio");
+      document.getElementById("benchmarkView").classList.toggle("hidden", tab !== "benchmark");
+      if (tab === "benchmark") loadBenchmark();
+    }
+
+    function usePreset(key) {
+      document.getElementById("newPromptInput").value = PRESETS[key];
+    }
+
+    function showNewSceneModal() {
+      switchTab("studio");
+      document.getElementById("composerCard").scrollIntoView({ behavior: "smooth" });
+      document.getElementById("newPromptInput").focus();
+    }
+
+    async function loadProjects(selectId = null) {
+      const resp = await fetch("/api/projects");
+      projects = await resp.json();
+      const list = document.getElementById("projectList");
+      if (!projects.length) {
+        list.innerHTML = '<div style="font-size:12px; color:var(--muted); padding:8px;">No scenes yet. Enter any prompt to start!</div>';
+        return;
+      }
+      list.innerHTML = projects.map(p => `
+        <div class="project-item ${activeProject && activeProject.project_id === p.project_id ? 'active' : ''}" onclick="selectProject('${p.project_id}')">
+          <div class="title">${escapeHtml(p.title)}</div>
+          <div class="meta">${p.versions.length} version${p.versions.length === 1 ? '' : 's'} · ${p.project_id}</div>
+        </div>
+      `).join("");
+
+      if (selectId) {
+        const found = projects.find(p => p.project_id === selectId);
+        if (found) renderProject(found);
+      } else if (!activeProject && projects.length) {
+        renderProject(projects[0]);
+      }
+    }
+
+    function selectProject(id) {
+      const p = projects.find(x => x.project_id === id);
+      if (p) {
+        switchTab("studio");
+        selectedVersionId = p.versions.length ? p.versions[p.versions.length - 1].version_id : null;
+        renderProject(p);
+      }
+    }
+
+    function renderProject(p) {
+      activeProject = p;
+      document.getElementById("workspace").classList.remove("hidden");
+      document.getElementById("projTitle").textContent = p.title;
+      document.getElementById("projInitialPrompt").textContent = p.initial_prompt;
+
+      // Update sidebar active highlight
+      document.querySelectorAll(".project-item").forEach(el => {
+        el.classList.toggle("active", el.textContent.includes(p.project_id));
+      });
+
+      const versions = p.versions || [];
+      if (!selectedVersionId || !versions.some(v => v.version_id === selectedVersionId)) {
+        selectedVersionId = versions.length ? versions[versions.length - 1].version_id : null;
+      }
+
+      const vBar = document.getElementById("versionBar");
+      vBar.innerHTML = versions.map(v => `
+        <button class="ver-pill ${v.version_id === selectedVersionId ? 'active' : ''}" onclick="selectVersion('${v.version_id}')">
+          ${v.version_id}: ${v.edit_instruction ? escapeHtml(v.edit_instruction.slice(0, 42)) + (v.edit_instruction.length > 42 ? '…' : '') : 'Original Scene'}
+        </button>
+      `).join("");
+
+      const v1 = versions[0];
+      const cur = versions.find(v => v.version_id === selectedVersionId) || v1;
+      const parent = cur.parent_version_id ? (versions.find(v => v.version_id === cur.parent_version_id) || v1) : v1;
+
+      document.getElementById("editParentBadge").textContent = `Editing from ${cur.version_id}`;
+      const isWedding = p.initial_prompt.toLowerCase().includes("wedding") || p.initial_prompt.toLowerCase().includes("bride");
+      const chips = isWedding ? QUICK_EDITS.wedding : QUICK_EDITS.general;
+      document.getElementById("editQuickChips").innerHTML = chips.map(c =>
+        `<span class="chip" onclick="document.getElementById('editInput').value='${c.replace(/'/g, "\\'")}'">${escapeHtml(c.slice(0, 56))}${c.length > 56 ? '…' : ''}</span>`
+      ).join("");
+
+      // Videos
+      const vOrigEl = document.getElementById("videoOriginal");
+      const vEditEl = document.getElementById("videoEdited");
+
+      const leftV = (cur.version_id === v1.version_id) ? v1 : parent;
+      document.getElementById("leftVideoLabel").textContent = `${leftV.version_id === 'v1' ? 'Original' : 'Parent'} (${leftV.version_id})`;
+      document.getElementById("leftVideoTask").textContent = leftV.video_task || "reference_to_video";
+      if (vOrigEl.dataset.src !== leftV.video_url && leftV.video_url) {
+        vOrigEl.src = leftV.video_url;
+        vOrigEl.dataset.src = leftV.video_url;
+      }
+      document.getElementById("leftVideoMeta").innerHTML = `
+        <span>IR: ${fmtMs(leftV.latency?.ir_compile_ms)}</span>
+        <span>Refs: ${fmtMs(leftV.latency?.reference_sync_ms)}</span>
+        <span>Video: ${fmtMs(leftV.latency?.video_gen_ms)}</span>
+      `;
+
+      document.getElementById("rightVideoLabel").textContent = cur.edit_instruction
+        ? `Edited (${cur.version_id}): ${cur.edit_instruction.slice(0, 48)}${cur.edit_instruction.length > 48 ? '…' : ''}`
+        : `Current (${cur.version_id}) — Apply an edit above to compare`;
+      document.getElementById("rightVideoTask").textContent = cur.video_task || "—";
+      if (vEditEl.dataset.src !== cur.video_url && cur.video_url) {
+        vEditEl.src = cur.video_url;
+        vEditEl.dataset.src = cur.video_url;
+      }
+      document.getElementById("rightVideoMeta").innerHTML = `
+        <span>IR Ack: <b>${fmtMs(cur.latency?.ir_compile_ms)}</b></span>
+        <span>Refs: <b>${fmtMs(cur.latency?.reference_sync_ms)}</b></span>
+        <span>Neural Video: <b>${fmtMs(cur.latency?.video_gen_ms)}</b></span>
+        <span>Hydrogen Audit: <b>${fmtMs(cur.latency?.hydrogen_eval_ms)}</b></span>
+      `;
+
+      renderMetrics(cur);
+      renderReferences(cur.references);
+      renderIR(cur.ir, cur.edit_plan);
+    }
+
+    function selectVersion(vid) {
+      selectedVersionId = vid;
+      if (activeProject) renderProject(activeProject);
+    }
+
+    function syncPlayBoth() {
+      const a = document.getElementById("videoOriginal");
+      const b = document.getElementById("videoEdited");
+      if (!a.paused || !b.paused) {
+        a.pause(); b.pause();
+      } else {
+        a.currentTime = 0; b.currentTime = 0;
+        a.play().catch(()=>{}); b.play().catch(()=>{});
+      }
+    }
+
+    function scoreClass(val, invert = false) {
+      if (val == null) return "";
+      if (invert) return val <= 20 ? "good" : val <= 45 ? "warn" : "bad";
+      return val >= 78 ? "good" : val >= 55 ? "warn" : "bad";
+    }
+
+    function renderMetrics(v) {
+      const ev = v.evaluation;
+      const refs = v.references;
+      const lat = v.latency || {};
+      const reusePct = refs ? `${Math.round((refs.reuse_ratio || 0) * 100)}% (${refs.reused_count}/${refs.assets.length})` : "—";
+      document.getElementById("reuseBadge").textContent = `Ref Cache Reuse: ${reusePct}`;
+      document.getElementById("evalVerdict").textContent = ev ? `Hydrogen Verdict: ${ev.verdict}` : "Evaluation pending or skipped.";
+
+      const cards = [
+        { label: "IR Edit Ack", val: fmtMs(lat.ir_compile_ms), sub: "Gemini 4 Carbon", cls: (lat.ir_compile_ms || 9999) < 4500 ? "good" : "warn" },
+        { label: "Neural Video", val: fmtMs(lat.video_gen_ms), sub: "Gemini Omni 1.2 Flash", cls: "" },
+        { label: "Instruction Adherence", val: ev ? `${ev.instruction_adherence}` : "—", sub: "/ 100 (Hydrogen)", cls: scoreClass(ev?.instruction_adherence) },
+        { label: "Identity Preservation", val: ev ? `${ev.identity_preservation}` : "—", sub: "/ 100 (Hydrogen)", cls: scoreClass(ev?.identity_preservation) },
+        { label: "Appearance Consistency", val: ev ? `${ev.appearance_consistency}` : "—", sub: "/ 100 (Hydrogen)", cls: scoreClass(ev?.appearance_consistency) },
+        { label: "Temporal Coherence", val: ev ? `${ev.temporal_coherence}` : "—", sub: "/ 100 (Hydrogen)", cls: scoreClass(ev?.temporal_coherence) },
+        { label: "Unintended Changes ↓", val: ev ? `${ev.unintended_change_score}` : "—", sub: "0 = zero drift (lower better)", cls: scoreClass(ev?.unintended_change_score, true) },
+      ];
+      document.getElementById("metricsGrid").innerHTML = cards.map(c => `
+        <div class="metric">
+          <div class="m-label">${c.label}</div>
+          <div class="m-val ${c.cls}">${c.val}</div>
+          <div class="m-sub">${c.sub}</div>
+        </div>
+      `).join("");
+
+      const entRow = document.getElementById("entityEvalRow");
+      if (ev && ev.entity_scores && ev.entity_scores.length) {
+        entRow.innerHTML = ev.entity_scores.map(e => `
+          <span class="pill" title="${escapeHtml(e.notes)}">
+            <b>${escapeHtml(e.entity_name)}</b>: ID ${e.identity_score} · App ${e.appearance_score}
+          </span>
+        `).join("");
+      } else {
+        entRow.innerHTML = "";
+      }
+    }
+
+    function renderReferences(refReport) {
+      const grid = document.getElementById("refsGrid");
+      if (!refReport || !refReport.assets || !refReport.assets.length) {
+        grid.innerHTML = '<div style="font-size:12px; color:var(--muted);">No appearance references for this version.</div>';
+        return;
+      }
+      grid.innerHTML = refReport.assets.map(a => {
+        const bCls = a.status === "reused" ? "badge-reused" : a.status === "edited" ? "badge-edited" : "badge-created";
+        return `
+          <div class="ref-card">
+            <img src="${a.url}" alt="${escapeHtml(a.label)}" loading="lazy" />
+            <div class="ref-meta">
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
+                <strong>${escapeHtml(a.label)}</strong>
+                <span class="badge ${bCls}">${a.status}</span>
+              </div>
+              <div style="color:var(--muted); font-size:11px; margin-top:4px;">
+                id: ${escapeHtml(a.target_id)} · rev ${a.revision} · ${a.status === 'reused' ? '0ms (cache hit)' : fmtMs(a.latency_ms)}
+              </div>
+            </div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function renderIR(ir, editPlan) {
+      const el = document.getElementById("irInspector");
+      if (!ir) { el.innerHTML = ""; return; }
+      const changed = new Set(editPlan?.changed_entity_ids || []);
+      const added = new Set(editPlan?.added_entity_ids || []);
+      const unchanged = new Set(editPlan?.unchanged_entity_ids || []);
+
+      document.getElementById("irDiffSummary").textContent = editPlan
+        ? `Diff: ${editPlan.edit_summary} | Strategy: ${editPlan.edit_strategy} (${editPlan.strategy_reason})`
+        : `${ir.summary}`;
+
+      const entitiesHtml = (ir.entities || []).map(e => {
+        const cls = changed.has(e.id) ? "changed" : added.has(e.id) ? "added" : unchanged.has(e.id) ? "unchanged" : "";
+        const tag = changed.has(e.id) ? '<span class="badge badge-edited">changed</span>'
+          : added.has(e.id) ? '<span class="badge badge-created">added</span>'
+          : unchanged.has(e.id) ? '<span class="badge badge-reused">reused</span>' : '';
+        return `
+          <div class="entity-row ${cls}">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <strong>${escapeHtml(e.name)} <span style="color:var(--muted); font-weight:400;">(${escapeHtml(e.id)} · rev ${e.appearance_revision})</span></strong>
+              ${tag}
+            </div>
+            <div style="font-size:12px; color:#cbd5e1; margin-top:4px;"><b>Identity:</b> ${escapeHtml(e.identity_traits)}</div>
+            <div style="font-size:12px; color:#94a3b8; margin-top:2px;"><b>Appearance:</b> ${escapeHtml(e.appearance)}</div>
+            <div style="font-size:11.5px; color:#64748b; margin-top:2px;"><b>Placement:</b> ${escapeHtml(e.position_hint)}</div>
+          </div>
+        `;
+      }).join("");
+
+      const eventsHtml = (ir.events || []).map(ev => `
+        <div style="margin-bottom:6px; font-size:12px;">
+          <span class="badge badge-strategy">${ev.start_sec.toFixed(1)}s–${ev.end_sec.toFixed(1)}s</span>
+          ${escapeHtml(ev.action)}
+          ${ev.audio_cue ? `<span style="color:var(--muted);"> (${escapeHtml(ev.audio_cue)})</span>` : ''}
+        </div>
+      `).join("");
+
+      el.innerHTML = `
+        <div class="ir-block">
+          <h4>Persistent Entities (${ir.entities.length})</h4>
+          ${entitiesHtml}
+        </div>
+        <div class="ir-block">
+          <h4>Setting (rev ${ir.setting.revision})</h4>
+          <div style="font-size:12px; color:#cbd5e1; margin-bottom:10px;">
+            <div><b>Location:</b> ${escapeHtml(ir.setting.location)}</div>
+            <div><b>Lighting:</b> ${escapeHtml(ir.setting.lighting)} (${escapeHtml(ir.setting.time_of_day)})</div>
+            <div><b>Atmosphere:</b> ${escapeHtml(ir.setting.atmosphere)}</div>
+          </div>
+          <h4>Camera</h4>
+          <div style="font-size:12px; color:#cbd5e1; margin-bottom:10px;">
+            ${escapeHtml(ir.camera.shot_type)} · ${escapeHtml(ir.camera.angle)} · ${escapeHtml(ir.camera.movement)} (${escapeHtml(ir.camera.lens_feel)})
+          </div>
+          <h4>Timed Events (${ir.duration_sec}s)</h4>
+          ${eventsHtml}
+        </div>
+      `;
+    }
+
+    function startProgress(title) {
+      const card = document.getElementById("progressCard");
+      card.classList.remove("hidden");
+      document.getElementById("progressTitle").textContent = title;
+      ["ir", "refs", "video", "eval"].forEach(s => {
+        const box = document.getElementById(`step-${s}`);
+        box.classList.remove("active", "done");
+        document.getElementById(`step-${s}-time`).textContent = "—";
+      });
+      const startTs = performance.now();
+      clearInterval(timerInterval);
+      timerInterval = setInterval(() => {
+        document.getElementById("progressElapsed").textContent = `${((performance.now() - startTs) / 1000).toFixed(1)}s`;
+      }, 100);
+    }
+
+    function stopProgress() {
+      clearInterval(timerInterval);
+    }
+
+    function setStepState(step, state, timeText = null) {
+      const box = document.getElementById(`step-${step}`);
+      box.classList.remove("active", "done");
+      if (state) box.classList.add(state);
+      if (timeText !== null) document.getElementById(`step-${step}-time`).textContent = timeText;
+    }
+
+    async function consumeSSE(url, body, onEvent) {
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const parts = buf.split("\n\n");
+        buf = parts.pop();
+        for (const chunk of parts) {
+          const line = chunk.trim();
+          if (line.startsWith("data:")) {
+            const payload = JSON.parse(line.slice(5).trim());
+            onEvent(payload);
+          }
+        }
+      }
+    }
+
+    function handleStreamEvent(ev) {
+      if (ev.message) document.getElementById("liveLog").textContent = ev.message;
+      if (ev.stage === "compiling_ir") setStepState("ir", "active");
+      if (ev.stage === "ir_ready") {
+        setStepState("ir", "done", fmtMs(ev.latency_ms));
+        setStepState("refs", "active");
+        if (ev.ir) renderIR(ev.ir, ev.edit_plan || null);
+      }
+      if (ev.stage === "refs_ready") {
+        setStepState("refs", "done", fmtMs(ev.references?.total_latency_ms));
+        setStepState("video", "active");
+        if (ev.references) renderReferences(ev.references);
+      }
+      if (ev.stage === "video_ready") {
+        setStepState("video", "done", fmtMs(ev.version?.latency?.video_gen_ms));
+        setStepState("eval", "active");
+      }
+      if (ev.stage === "eval_ready") {
+        setStepState("eval", "done", fmtMs(ev.evaluation?.latency_ms));
+      }
+      if (ev.stage === "done" && ev.project) {
+        stopProgress();
+        selectedVersionId = ev.project.versions[ev.project.versions.length - 1].version_id;
+        loadProjects(ev.project.project_id);
+      }
+      if (ev.stage === "error") {
+        stopProgress();
+        document.getElementById("liveLog").textContent = `Error: ${ev.message}`;
+      }
+    }
+
+    async function generateNewScene() {
+      const prompt = document.getElementById("newPromptInput").value.trim();
+      if (!prompt) return alert("Enter a scene prompt first.");
+      const fidelity = document.getElementById("fidelitySelect").value;
+      const btn = document.getElementById("btnGenerate");
+      btn.disabled = true;
+      startProgress("Generating Structured Scene Video...");
+      try {
+        await consumeSSE("/api/projects/stream", { prompt, fidelity, resolution: "720p", run_eval: true }, handleStreamEvent);
+      } catch (e) {
+        stopProgress();
+        document.getElementById("liveLog").textContent = `Request failed: ${e.message}`;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function runEdit() {
+      if (!activeProject) return;
+      const edit_instruction = document.getElementById("editInput").value.trim();
+      if (!edit_instruction) return alert("Enter an edit instruction.");
+      const fidelity = document.getElementById("fidelitySelect").value;
+      const btn = document.getElementById("btnEdit");
+      btn.disabled = true;
+      startProgress(`Editing ${activeProject.title} (from ${selectedVersionId})...`);
+      try {
+        await consumeSSE(
+          `/api/projects/${activeProject.project_id}/edit/stream`,
+          { edit_instruction, parent_version_id: selectedVersionId, fidelity, resolution: "720p", run_eval: true },
+          handleStreamEvent
+        );
+        document.getElementById("editInput").value = "";
+      } catch (e) {
+        stopProgress();
+        document.getElementById("liveLog").textContent = `Edit failed: ${e.message}`;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function loadBenchmark() {
+      const el = document.getElementById("benchmarkContent");
+      const resp = await fetch("/api/benchmark");
+      const data = await resp.json();
+      if (!data.available || !data.results) {
+        el.innerHTML = '<div style="color:var(--muted); font-size:13px;">No benchmark results found yet. Run <code>uv run python benchmark.py</code> to generate real measured comparisons.</div>';
+        return;
+      }
+      const r = data.results;
+      const rows = (r.comparisons || []).map(c => `
+        <tr>
+          <td><strong>${escapeHtml(c.scene_name)}</strong><div style="font-size:11px; color:var(--muted);">${escapeHtml(c.edit_label)}</div></td>
+          <td><span class="badge badge-reused">${Math.round((c.structured.reuse_ratio || 0) * 100)}%</span></td>
+          <td>${fmtMs(c.structured.ir_ack_ms)}</td>
+          <td><b class="good">${c.structured.eval.identity_preservation}</b> vs <span class="bad">${c.baseline.eval.identity_preservation}</span></td>
+          <td><b class="good">${c.structured.eval.instruction_adherence}</b> vs ${c.baseline.eval.instruction_adherence}</td>
+          <td><b class="good">${c.structured.eval.unintended_change_score}</b> vs <span class="bad">${c.baseline.eval.unintended_change_score}</span></td>
+          <td><b class="good">${c.structured.eval.overall_score}</b> vs <span class="bad">${c.baseline.eval.overall_score}</span></td>
+        </tr>
+      `).join("");
+
+      const videoCards = (r.comparisons || []).map(c => `
+        <div class="card" style="margin-top:16px; background:var(--bg);">
+          <div class="card-header" style="margin-bottom:10px;">
+            <div>
+              <div class="card-title">${escapeHtml(c.scene_name)} — ${escapeHtml(c.edit_label)}</div>
+              <div style="font-size:12px; color:var(--muted);">Edit: "${escapeHtml(c.edit_instruction)}"</div>
+            </div>
+            <span class="badge badge-reused">Identity Gain: +${c.structured.eval.identity_preservation - c.baseline.eval.identity_preservation} pts</span>
+          </div>
+          <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:12px;">
+            <div class="video-pane">
+              <div class="video-pane-head"><span>Original (v1)</span></div>
+              <video src="${c.original_video_url}" controls playsinline loop></video>
+            </div>
+            <div class="video-pane">
+              <div class="video-pane-head"><span>Structured Edit (Ours)</span><span class="badge badge-reused">ID ${c.structured.eval.identity_preservation} · Drift ${c.structured.eval.unintended_change_score}</span></div>
+              <video src="${c.structured.video_url}" controls playsinline loop></video>
+              <div class="video-pane-foot"><span>${escapeHtml(c.structured.eval.verdict)}</span></div>
+            </div>
+            <div class="video-pane">
+              <div class="video-pane-head"><span>Naive Prompt-Only Baseline</span><span class="badge badge-edited">ID ${c.baseline.eval.identity_preservation} · Drift ${c.baseline.eval.unintended_change_score}</span></div>
+              <video src="${c.baseline.video_url}" controls playsinline loop></video>
+              <div class="video-pane-foot"><span>${escapeHtml(c.baseline.eval.verdict)}</span></div>
+            </div>
+          </div>
+        </div>
+      `).join("");
+
+      el.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>Benchmark Case</th>
+              <th>Ref Reuse</th>
+              <th>IR Ack</th>
+              <th>Identity (Ours vs Base)</th>
+              <th>Adherence (Ours vs Base)</th>
+              <th>Unintended Drift ↓ (Ours vs Base)</th>
+              <th>Overall (Ours vs Base)</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+        ${videoCards}
+      `;
+    }
+
+    function fmtMs(ms) {
+      if (ms == null || ms === 0) return "—";
+      return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(2)}s`;
+    }
+
+    function escapeHtml(s) {
+      return String(s || "").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+    }
+
+    loadProjects();
+  </script>
+</body>
+</html>

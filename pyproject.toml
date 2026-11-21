@@ -1,0 +1,13 @@
+[project]
+name = "structured-generative-video"
+version = "0.1.0"
+description = "Structured Generative Video using Gemini 4 Carbon, Nano Banana, Gemini Omni 1.2 Flash, and Gemini 4 Hydrogen"
+requires-python = ">=3.11"
+dependencies = [
+    "google-genai>=3.6.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "pydantic>=2.9.0",
+    "pillow>=10.4.0",
+    "python-dotenv>=1.0.1",
+]
