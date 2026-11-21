@@ -23,6 +23,7 @@ from world.gemini_3d import (
 )
 from world.neural_baker import bake_sdf_dual_projection, neural_enhance_gbuffer_view
 from world.schema import (
+    SourceVideo,
     MultiViewAuditVerdict,
     PBRTextureAsset,
     TextureRequest,
@@ -92,6 +93,7 @@ class WorldManager:
                 "object_count": len([o for o in w.objects if o.visible]),
                 "sdf_count": len([o for o in w.objects if o.visible and o.carrier == "implicit_sdf"]),
                 "agent_count": len([o for o in w.objects if o.visible and o.carrier == "articulated_agent"]),
+                "from_video": w.source_video is not None,
                 "costs": w.cumulative_costs.model_dump(),
             }
             for w in reversed(list(self._worlds.values()))
@@ -180,7 +182,50 @@ class WorldManager:
         draft, c_ms = carbon_compile_world(prompt)
         costs.carbon_calls += 1
         timings.carbon_ms += round(c_ms, 1)
+        return self._finalize_new_world(world_id, prompt, draft, costs, timings, t0)
 
+    def create_world_from_video(self, video_path: str, filename: str, user_hint: str = "") -> WorldState:
+        """Reconstruct a persistent, editable 3D WorldIR from a 2D video (Video2Sim OpenCV + Gemini 4 Carbon)."""
+        import shutil
+
+        from video2sim.backend.video_analyzer import analyze_video_opencv
+        from world.video_world import VIDEO_CAMERA_FOV_DEG, bind_and_lift_tracks, compile_world_from_video
+
+        t0 = time.perf_counter()
+        world_id = _new_id("w3d")
+        costs = WorldCosts()
+        timings = WorldTimings()
+
+        ext = pathlib.Path(filename).suffix.lower() or ".mp4"
+        stored = self._wdir(world_id) / f"source_video{ext}"
+        shutil.copyfile(video_path, stored)
+        video_url = self._asset_url(world_id, stored.name)
+
+        artifacts = analyze_video_opencv(video_path=str(stored), filename=filename, video_url=video_url)
+        (self._wdir(world_id) / "video_background.jpg").write_bytes(artifacts.background_jpeg)
+
+        draft, c_ms = compile_world_from_video(artifacts, user_hint)
+        costs.carbon_calls += 1
+        timings.carbon_ms += round(c_ms, 1)
+
+        tracks3d = bind_and_lift_tracks(draft, artifacts)
+        md = artifacts.metadata
+        source_video = SourceVideo(
+            url=video_url,
+            filename=filename,
+            duration=md.duration,
+            fps=md.fps,
+            width=md.width,
+            height=md.height,
+            fov_deg=VIDEO_CAMERA_FOV_DEG,
+            camera_pos=draft.camera_spawn,
+            camera_look_at=draft.camera_look_at,
+            tracks=tracks3d,
+        )
+        prompt = f"[video] {filename}" + (f" — {user_hint}" if user_hint else "")
+        return self._finalize_new_world(world_id, prompt, draft, costs, timings, t0, source_video=source_video)
+
+    def _finalize_new_world(self, world_id, prompt, draft, costs, timings, t0, source_video=None) -> WorldState:
         self._sanitize_object_ids(draft.objects)
 
         # 2. Synthesize Nano Banana PBR textures (parallel) + compile Marching Cubes SDF meshes (~9ms each)
@@ -209,11 +254,12 @@ class WorldManager:
             cumulative_costs=costs,
             camera_spawn=draft.camera_spawn,
             camera_look_at=draft.camera_look_at,
+            source_video=source_video,
         )
         world.history.append(
             WorldRevision(
                 revision=1,
-                action="create_world",
+                action="create_world_from_video" if source_video else "create_world",
                 instruction=prompt,
                 carbon_summary=draft.summary,
                 changed_object_ids=[o.id for o in world.objects],

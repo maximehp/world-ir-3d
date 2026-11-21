@@ -112,6 +112,30 @@
       backdrop-filter: blur(8px);
     }
     .vp-controls button { padding: 5px 9px; font-size: 11.5px; }
+    .video-pip {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 300px;
+      background: rgba(9, 11, 16, 0.86);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      backdrop-filter: blur(8px);
+    }
+    .video-pip[hidden] { display: none; }
+    .video-pip .pip-head {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 4px 8px; font-size: 11px; color: var(--muted);
+    }
+    .video-pip .pip-head button { padding: 1px 7px; font-size: 11px; }
+    .video-pip video { width: 100%; display: block; background: #000; }
+    .video-pip.collapsed video { display: none; }
+    .video-drop {
+      display: block; width: 100%; box-sizing: border-box; padding: 8px;
+      border: 1px dashed var(--border); border-radius: 6px; font-size: 11.5px; color: var(--muted); cursor: pointer;
+    }
+    .video-drop input { display: block; margin-top: 5px; max-width: 100%; color: inherit; font-size: 11px; }
 
     .card {
       background: var(--panel2);
@@ -277,6 +301,19 @@
       </div>
 
       <div class="card">
+        <div class="card-title">1b. 2D Video → 3D World</div>
+        <label class="video-drop">Upload a 2D video (.mp4 / .mov / .webm). OpenCV tracks every moving object, Gemini 4 Carbon rebuilds the scene in 3D, and tracked objects replay their motion as 3D agents.
+          <input type="file" id="videoFile" accept="video/*" />
+        </label>
+        <input type="text" id="videoHint" placeholder="Optional direction, e.g. 'make it a snowy dusk'" style="margin-top:6px;" />
+        <div class="row" style="margin-top:6px; gap:6px; display:flex;">
+          <button id="btnVideoSample" type="button" title="Reconstruct the bundled bird-landscape sample video">Use Sample Video</button>
+          <button id="btnVideoWorld" class="primary" type="button">Reconstruct 3D World</button>
+        </div>
+        <div id="videoStatus" class="status"></div>
+      </div>
+
+      <div class="card">
         <div class="card-title">
           <span>2. Surgical Chat Modification</span>
           <button id="btnUndo" style="padding:2px 7px; font-size:10.5px;">Undo (0 calls)</button>
@@ -323,12 +360,17 @@
         Orbit: Left-drag rotate · Right-drag pan · Scroll zoom · Click object to select<br/>
         Walk Mode (WASD): Press <b>F</b> or click Walk Mode · Mouse look · Space/Shift fly
       </div>
+      <div id="videoPip" class="video-pip" hidden>
+        <div class="pip-head"><span id="pipTitle">Source video · synced to 3D</span><button id="btnPipToggle" type="button">–</button></div>
+        <video id="srcVideo" muted loop playsinline controls></video>
+      </div>
       <div class="vp-controls">
         <button id="btnOrbitMode" class="active">Orbit Camera</button>
         <button id="btnWalkMode">Walk Mode (WASD + Look)</button>
         <button id="btnCamFront">Front</button>
         <button id="btnCamBack">180° Back</button>
         <button id="btnCamOverview">Aerial 3/4</button>
+        <button id="btnCamVideo" title="Match the original video camera" hidden>Video Camera</button>
         <button id="btnCamInspect" title="Orbit close around currently selected object">Inspect Selected</button>
         <button id="btnRunAudit" class="primary">Run 4-View Hydrogen Audit</button>
       </div>

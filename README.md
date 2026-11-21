@@ -16,6 +16,16 @@ A full-3D generative world representation and live WebGL2 studio where worlds ar
   - **Gemini 4 Hydrogen (`gemini-4-hydrogen`):** Independently audits a live 4-viewpoint 3D WebGL render plate (Elevated 3/4 Overview, Eye-Level Front, Opposite 180° Back, Hero Close-Up) and can emit bounded spatial fixes.
 - **Real-Time WebGL2 Studio (`world/static/`):** Vendored Three.js `0.170.0`, ACESFilmic tone mapping, 2048px `PCFSoftShadowMap`, dynamic sky-dome PMREM reflections, free **WASD + Mouse Look** walking/flying, 360° orbit + click-to-select, and surgical live hot-patching.
 
+## 2D Video → 3D World (Video2Sim merged into WorldIR)
+
+In the studio, card **1b. 2D Video → 3D World** takes an uploaded video (or the bundled sample) and reconstructs it as a normal persistent WorldIR world:
+
+1. **OpenCV** (`video2sim/backend/video_analyzer.py`) computes a clean temporal-median background, keyframes, and tracked 2D trajectories of every moving object.
+2. **Gemini 4 Carbon** (`world/video_world.py`) sees the background + keyframes and compiles a multi-carrier world matching the video, estimates the original camera, and binds each trajectory to an articulated agent (`behavior.kind = "follow_video_path"`).
+3. Each trajectory is **unprojected through the matched camera** into a timed 3D path (`world.source_video.tracks`). The studio replays the paths in sync with a picture-in-picture of the source video; **Video Camera** snaps to the original viewpoint.
+
+The result supports everything else: walk mode, surgical chat edits (tracked agents keep their paths), undo, and the Hydrogen audit. API: `POST /api/worlds/from-video` (multipart `file` or `use_sample=true`, optional `hint`).
+
 ## Quick Start (merged prototype)
 
 ```bash

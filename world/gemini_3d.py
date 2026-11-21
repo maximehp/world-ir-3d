@@ -93,35 +93,38 @@ def _call_json_model(model: str, system: str, contents, schema_cls, max_retries:
 # 1. Gemini 4 Carbon: Full 3D World Compiler
 # ---------------------------------------------------------------------------
 
+CARBON_WORLD_SYSTEM = (
+    "You are Gemini 4 Carbon, a 3D World Compiler producing Blender-style persistent 3D scenes.\n"
+    "Coordinate system: right-handed meters, +Y up, plaza/center at (0, 0, 0), ground height is auto-computed so set position[1] = 0.0 for all grounded objects.\n\n"
+    "YOU HAVE FOUR DISTINCT 3D GEOMETRY CARRIERS — USE THEM TOGETHER RICHLY:\n"
+    "1. `terrain`: analytic heightfield with automatic flat central plaza (plaza_radius 13..20m) and rolling outer hills (plus optional water plane for harbor/river/lake).\n"
+    "2. `parametric_assembly`: detailed multi-part 3D assemblies (NOT crude boxes!) — available kinds:\n"
+    "   - 'building' (recessed glowing windows, shutters, pitched tiled roof, door, steps, optional balcony/chimney)\n"
+    "   - 'tower' (tall stone clock/bell tower with spire/dome roof)\n"
+    "   - 'fountain' (stepped octagonal stone basin, central tier, reflective animated water & live 3D water jets)\n"
+    "   - 'tree' (branching 3D trunk + layered swaying canopy: oak, pine, cypress, blossom, palm)\n"
+    "   - 'archway' (true walkable 3D vaulted stone arch), 'bridge', 'lamp_post' (casts real warm point light!), 'market_stall', 'bench', 'gazebo', 'windmill' (spinning sails!), 'lighthouse' (sweeping beam!), 'scooter', 'car', 'boat'.\n"
+    "3. `implicit_sdf` (ALWAYS INCLUDE AT LEAST ONE!): smooth-min Signed Distance Field compiled via Marching Cubes into a smooth organic 3D mesh! "
+    "Use this for any sculptural centerpiece, monument, carved statue, organic rock arch, crystal spire, animal sculpture, or bespoke unseen object! "
+    "Compose 5..12 primitives in normalized [-1, 1]^3 space using 'smooth_union' (k=0.14..0.28) and 'smooth_subtract', using mirror_x=True for symmetric limbs/ears/arches! Set pedestal=True if it's a statue.\n"
+    "4. `articulated_agent` (ALWAYS INCLUDE AT LEAST ONE AUTONOMOUS MOVING AGENT!): rig_kind in ['bird_flock', 'fox', 'scooter_rider', 'car_driver', 'boat_cruiser', 'floating_lanterns'].\n"
+    "   - Give birds `behavior.kind='orbit_and_perch'` referencing a real building/tower/fountain `target_id` so they circle around it, disappear behind it, and land on its roof/rim!\n"
+    "   - Give vehicles/creatures `behavior.kind='patrol_ring'` around the plaza!\n\n"
+    "TEXTURE GENERATION (`texture_requests`, 2 to 3 seamless tileable PBR materials):\n"
+    "- Generate 2-3 cohesive seamless material textures via Nano Banana (e.g. 'plaza_cobble' for terrain.texture_id, 'stone_wall' for buildings/tower/fountain, 'marble_sculpt' for SDF/accents).\n"
+    "- Reference their exact `id` inside `terrain.texture_id` and `object.material.texture_id`!\n\n"
+    "SPATIAL LAYOUT DISCIPLINE (CRITICAL FOR ZERO COLLISIONS):\n"
+    "- Place a focal landmark (e.g. fountain, archway, or SDF sculpture) near (0, 0, 0) or (0, 0, -2).\n"
+    "- Arrange 3-6 buildings/towers/stalls in a welcoming horseshoe/ring at radius 10m..18m around the plaza, with >= 8m center-to-center spacing so NO buildings ever overlap! Rotate them (`rotation_y_deg`) to face toward the plaza center!\n"
+    "- Place 4-7 trees around the perimeter (radius 13m..24m), 2-4 lampposts along walkways (radius 7m..12m), plus benches/vehicles cleanly clear of buildings.\n"
+    "- Aim for 14..22 total persistent objects — rich, recognizable, navigable from all 360 degrees!\n"
+    "- Place `camera_spawn` around `[0, 4.5, 22]` looking toward `[0, 2.5, -1]` with an unobstructed view into the scene."
+)
+
+
 def carbon_compile_world(user_prompt: str) -> tuple[CarbonWorldDraft, float]:
     """Compile an unseen natural-language prompt into a structured multi-carrier 3D WorldIR."""
-    system = (
-        "You are Gemini 4 Carbon, a 3D World Compiler producing Blender-style persistent 3D scenes.\n"
-        "Coordinate system: right-handed meters, +Y up, plaza/center at (0, 0, 0), ground height is auto-computed so set position[1] = 0.0 for all grounded objects.\n\n"
-        "YOU HAVE FOUR DISTINCT 3D GEOMETRY CARRIERS — USE THEM TOGETHER RICHLY:\n"
-        "1. `terrain`: analytic heightfield with automatic flat central plaza (plaza_radius 13..20m) and rolling outer hills (plus optional water plane for harbor/river/lake).\n"
-        "2. `parametric_assembly`: detailed multi-part 3D assemblies (NOT crude boxes!) — available kinds:\n"
-        "   - 'building' (recessed glowing windows, shutters, pitched tiled roof, door, steps, optional balcony/chimney)\n"
-        "   - 'tower' (tall stone clock/bell tower with spire/dome roof)\n"
-        "   - 'fountain' (stepped octagonal stone basin, central tier, reflective animated water & live 3D water jets)\n"
-        "   - 'tree' (branching 3D trunk + layered swaying canopy: oak, pine, cypress, blossom, palm)\n"
-        "   - 'archway' (true walkable 3D vaulted stone arch), 'bridge', 'lamp_post' (casts real warm point light!), 'market_stall', 'bench', 'gazebo', 'windmill' (spinning sails!), 'lighthouse' (sweeping beam!), 'scooter', 'car', 'boat'.\n"
-        "3. `implicit_sdf` (ALWAYS INCLUDE AT LEAST ONE!): smooth-min Signed Distance Field compiled via Marching Cubes into a smooth organic 3D mesh! "
-        "Use this for any sculptural centerpiece, monument, carved statue, organic rock arch, crystal spire, animal sculpture, or bespoke unseen object! "
-        "Compose 5..12 primitives in normalized [-1, 1]^3 space using 'smooth_union' (k=0.14..0.28) and 'smooth_subtract', using mirror_x=True for symmetric limbs/ears/arches! Set pedestal=True if it's a statue.\n"
-        "4. `articulated_agent` (ALWAYS INCLUDE AT LEAST ONE AUTONOMOUS MOVING AGENT!): rig_kind in ['bird_flock', 'fox', 'scooter_rider', 'boat_cruiser', 'floating_lanterns'].\n"
-        "   - Give birds `behavior.kind='orbit_and_perch'` referencing a real building/tower/fountain `target_id` so they circle around it, disappear behind it, and land on its roof/rim!\n"
-        "   - Give vehicles/creatures `behavior.kind='patrol_ring'` around the plaza!\n\n"
-        "TEXTURE GENERATION (`texture_requests`, 2 to 3 seamless tileable PBR materials):\n"
-        "- Generate 2-3 cohesive seamless material textures via Nano Banana (e.g. 'plaza_cobble' for terrain.texture_id, 'stone_wall' for buildings/tower/fountain, 'marble_sculpt' for SDF/accents).\n"
-        "- Reference their exact `id` inside `terrain.texture_id` and `object.material.texture_id`!\n\n"
-        "SPATIAL LAYOUT DISCIPLINE (CRITICAL FOR ZERO COLLISIONS):\n"
-        "- Place a focal landmark (e.g. fountain, archway, or SDF sculpture) near (0, 0, 0) or (0, 0, -2).\n"
-        "- Arrange 3-6 buildings/towers/stalls in a welcoming horseshoe/ring at radius 10m..18m around the plaza, with >= 8m center-to-center spacing so NO buildings ever overlap! Rotate them (`rotation_y_deg`) to face toward the plaza center!\n"
-        "- Place 4-7 trees around the perimeter (radius 13m..24m), 2-4 lampposts along walkways (radius 7m..12m), plus benches/vehicles cleanly clear of buildings.\n"
-        "- Aim for 14..22 total persistent objects — rich, recognizable, navigable from all 360 degrees!\n"
-        "- Place `camera_spawn` around `[0, 4.5, 22]` looking toward `[0, 2.5, -1]` with an unobstructed view into the scene."
-    )
+    system = CARBON_WORLD_SYSTEM
     return _call_json_model(
         CARBON_MODEL,
         system,
@@ -158,7 +161,10 @@ def carbon_compile_world_edit(
         "   - Add to `add_objects` placed cleanly without overlapping existing objects! Use `carrier='implicit_sdf'` with 5..12 smooth_union/subtract primitives for ANY sculptural, organic, animal statue, crystal, or bespoke custom 3D object!\n"
         "5. ATMOSPHERE / TIME-OF-DAY EDIT (e.g. 'switch to moonlit night with glowing warm windows', 'make it golden sunset with dense mist'):\n"
         "   - Update `new_atmosphere`.\n"
-        "6. If `selected_object_id` is provided and the user says 'this', 'it', or 'selected object', target `selected_object_id`."
+        "6. VIDEO-TRACKED AGENTS: agents with `behavior.kind='follow_video_path'` replay a motion path tracked from the source video (`behavior.video_track_id`). "
+        "When restyling/rescaling them keep their behavior untouched. Only change their behavior if the user explicitly asks them to stop following the video path. "
+        "New agents may reuse an existing `video_track_id` listed in `video_track_ids` to follow the same tracked motion.\n"
+        "7. If `selected_object_id` is provided and the user says 'this', 'it', or 'selected object', target `selected_object_id`."
     )
 
     compact_world = {
@@ -172,6 +178,7 @@ def carbon_compile_world_edit(
             "ground_color": world.terrain.ground_color,
         },
         "available_texture_ids": list(world.textures.keys()),
+        "video_track_ids": [t.id for t in world.source_video.tracks] if world.source_video else [],
         "objects": [
             {
                 "id": o.id,

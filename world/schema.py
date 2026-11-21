@@ -145,13 +145,13 @@ class ImplicitSDFSpec(BaseModel):
 # ---------------------------------------------------------------------------
 
 class ArticulatedAgentSpec(BaseModel):
-    rig_kind: Literal["bird_flock", "fox", "scooter_rider", "boat_cruiser", "floating_lanterns"] = "bird_flock"
+    rig_kind: Literal["bird_flock", "fox", "scooter_rider", "car_driver", "boat_cruiser", "floating_lanterns"] = "bird_flock"
     count: int = Field(default=5, ge=1, le=14, description="Number of instances in flock/group (1 for single vehicle/creature)")
     entity_scale: float = Field(default=1.0, ge=0.3, le=3.0)
 
 
 class BehaviorSpec(BaseModel):
-    kind: Literal["none", "orbit_target", "orbit_and_perch", "patrol_ring", "patrol_waypoints", "sway_wind", "rotate_continuous", "bob_water"] = "none"
+    kind: Literal["none", "orbit_target", "orbit_and_perch", "patrol_ring", "patrol_waypoints", "sway_wind", "rotate_continuous", "bob_water", "follow_video_path"] = "none"
     target_id: str | None = Field(default=None, description="ID of another persistent 3D world object to orbit, perch on, or circle")
     orbit_radius: float = Field(default=6.0, ge=1.2, le=28.0)
     orbit_height: float = Field(default=5.5, ge=0.5, le=20.0)
@@ -159,6 +159,7 @@ class BehaviorSpec(BaseModel):
     perch_duration_sec: float = Field(default=3.5, ge=1.0, le=12.0)
     fly_duration_sec: float = Field(default=7.5, ge=2.0, le=20.0)
     waypoints_xz: list[list[float]] = Field(default_factory=list, description="Optional [[x,z], ...] loop for patrol_waypoints")
+    video_track_id: str | None = Field(default=None, description="For kind='follow_video_path': ID of a tracked moving object from the source video (e.g. 'traj_1') whose reconstructed 3D path this agent replays")
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +242,29 @@ class WorldRevision(BaseModel):
     audit: MultiViewAuditVerdict | None = None
 
 
+class VideoTrack3D(BaseModel):
+    """A moving object tracked in the 2D source video, lifted into a timed 3D world-space path."""
+    id: str
+    label: str = "moving object"
+    region: Literal["sky", "ground", "water"] = "sky"
+    color: str = "#222222"
+    points: list[list[float]] = Field(default_factory=list, description="[[t_sec, x, y, z], ...] in world meters; y is absolute for sky tracks, ignored (terrain-snapped) for ground/water")
+
+
+class SourceVideo(BaseModel):
+    """The 2D video a world was reconstructed from, plus the matched camera and lifted 3D tracks."""
+    url: str
+    filename: str
+    duration: float
+    fps: float
+    width: int
+    height: int
+    fov_deg: float = 54.0
+    camera_pos: list[float] = Field(default=[0.0, 4.5, 22.0], min_length=3, max_length=3)
+    camera_look_at: list[float] = Field(default=[0.0, 2.5, 0.0], min_length=3, max_length=3)
+    tracks: list[VideoTrack3D] = Field(default_factory=list)
+
+
 class WorldState(BaseModel):
     world_id: str
     title: str
@@ -254,6 +278,7 @@ class WorldState(BaseModel):
     cumulative_costs: WorldCosts = Field(default_factory=WorldCosts)
     camera_spawn: list[float] = Field(default=[0.0, 3.2, 22.0], min_length=3, max_length=3)
     camera_look_at: list[float] = Field(default=[0.0, 2.5, 0.0], min_length=3, max_length=3)
+    source_video: SourceVideo | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +299,18 @@ class CarbonWorldDraft(BaseModel):
     objects: list[WorldObject] = Field(..., min_length=5, max_length=26)
     camera_spawn: list[float] = Field(default=[0.0, 3.5, 22.0], min_length=3, max_length=3)
     camera_look_at: list[float] = Field(default=[0.0, 2.5, 0.0], min_length=3, max_length=3)
+
+
+class VideoTrackBinding(BaseModel):
+    track_id: str = Field(..., description="Exact OpenCV track id from the video analysis, e.g. 'traj_1'")
+    agent_object_id: str = Field(..., description="ID of the articulated_agent object in `objects` that replays this track")
+    label: str = Field(..., description="What the moving thing is, e.g. 'white egret', 'red hatchback', 'jogger'")
+    region: Literal["sky", "ground", "water"] = Field(..., description="Whether it moves through the air, along the ground/road, or on water")
+
+
+class CarbonVideoWorldDraft(CarbonWorldDraft):
+    """WorldDraft reconstructed from a 2D video. camera_spawn/camera_look_at must approximate the ORIGINAL video camera."""
+    track_bindings: list[VideoTrackBinding] = Field(default_factory=list, max_length=12)
 
 
 class ObjectMutation(BaseModel):

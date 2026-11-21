@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pathlib
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -112,6 +112,43 @@ def create_world(req: CreateWorldReq):
         return world.model_dump()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"World generation failed: {exc}")
+
+
+VIDEO_SAMPLE = pathlib.Path(__file__).resolve().parent.parent / "video2sim" / "samples" / "sample_landscape_birds.mp4"
+
+
+@app.post("/api/worlds/from-video")
+def create_world_from_video(
+    file: UploadFile | None = File(default=None),
+    use_sample: bool = Form(default=False),
+    hint: str = Form(default=""),
+):
+    """2D video -> OpenCV tracking -> Gemini 4 Carbon reconstruction -> persistent 3D WorldIR with video-path agents."""
+    import shutil
+    import tempfile
+
+    if use_sample:
+        if not VIDEO_SAMPLE.exists():
+            raise HTTPException(status_code=404, detail="Sample video not found")
+        src, filename, tmp = str(VIDEO_SAMPLE), VIDEO_SAMPLE.name, None
+    elif file is not None:
+        ext = pathlib.Path(file.filename or "upload.mp4").suffix.lower() or ".mp4"
+        if ext not in {".mp4", ".webm", ".mov", ".avi", ".mkv", ".m4v"}:
+            raise HTTPException(status_code=400, detail=f"Unsupported video format: {ext}")
+        tmp = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
+        with tmp:
+            shutil.copyfileobj(file.file, tmp)
+        src, filename = tmp.name, file.filename or f"upload{ext}"
+    else:
+        raise HTTPException(status_code=400, detail="Upload a video file or set use_sample=true")
+    try:
+        world = world_manager.create_world_from_video(src, filename, user_hint=hint.strip())
+        return world.model_dump()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Video world reconstruction failed: {exc}")
+    finally:
+        if tmp is not None:
+            pathlib.Path(tmp.name).unlink(missing_ok=True)
 
 
 @app.post("/api/worlds/{world_id}/edit")

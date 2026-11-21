@@ -174,7 +174,9 @@ const state = {
   walkYaw: 0,
   walkPitch: -0.06,
   keys: new Set(),
+  videoTime: 0,
 };
+const srcVideoEl = document.getElementById("srcVideo");
 
 function applyAtmosphere(atm) {
   const isNight = atm.time_of_day === "night" || atm.time_of_day === "dusk";
@@ -303,6 +305,8 @@ async function loadFullWorld(world, resetCam = true) {
 
   await Promise.all(world.objects.filter(o => o.visible).map(o => mountSingleObject(o, world)));
 
+  syncSourceVideo(world);
+
   if (resetCam) {
     const sp = world.camera_spawn || [0, 5, 22];
     const lk = world.camera_look_at || [0, 2.5, 0];
@@ -383,6 +387,94 @@ function resolveTargetBounds(targetId) {
   return { cx: 0, cz: 0, topY: 3.2, radius: 3.0 };
 }
 
+// ---------------------------------------------------------------------------
+// Video-tracked agents: replay OpenCV trajectories lifted into 3D, synced to the source video
+// ---------------------------------------------------------------------------
+function sampleVideoTrack(track, vt) {
+  const pts = track.points;
+  if (!pts || !pts.length) return null;
+  if (vt < pts[0][0] - 0.05 || vt > pts[pts.length - 1][0] + 0.05) return null;
+  let lo = 0, hi = pts.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (pts[mid][0] <= vt) lo = mid; else hi = mid;
+  }
+  const a = pts[lo], b = pts[hi];
+  const k = THREE.MathUtils.clamp((vt - a[0]) / Math.max(b[0] - a[0], 1e-6), 0, 1);
+  return new THREE.Vector3(a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k, a[3] + (b[3] - a[3]) * k);
+}
+
+function updateVideoPathAgent(rt, dt, terrain) {
+  const sv = state.world?.source_video;
+  const trackId = rt.spec.behavior?.video_track_id;
+  const track = sv && trackId ? sv.tracks.find(x => x.id === trackId) : null;
+  if (!track) return false;
+  const vt = state.videoTime;
+  const g = rt.group;
+  const members = g.userData.flockMembers || g.userData.lanternMembers;
+
+  if (members) {
+    members.forEach((m, i) => {
+      const st = m.userData.agentState;
+      const p = sampleVideoTrack(track, vt - i * 0.12);
+      if (!p) { m.visible = false; return; }
+      if (i > 0) { p.x += (st.radiusOffset || 0) * 0.7; p.y += (st.heightOffset || 0) * 0.7; }
+      const prev = st.pos.clone();
+      if (!m.visible || prev.distanceTo(p) > 6) st.pos.copy(p); else st.pos.lerp(p, Math.min(1, dt * 12));
+      m.visible = true;
+      m.position.copy(st.pos);
+      const vel = st.pos.clone().sub(prev);
+      if (m.userData.wingL) {
+        if (vel.lengthSq() > 1e-6) m.lookAt(st.pos.clone().add(vel));
+        st.flapPhase = (st.flapPhase || 0) + dt * 10.5;
+        const flap = Math.sin(st.flapPhase) * 0.72;
+        m.userData.wingL.rotation.z = flap;
+        m.userData.wingR.rotation.z = -flap;
+      }
+    });
+    return true;
+  }
+
+  if (g.userData.patrolMesh) {
+    const p = sampleVideoTrack(track, vt);
+    if (!p) { g.visible = false; return true; }
+    const isBoat = rt.spec.agent?.rig_kind === "boat_cruiser" || track.region === "water";
+    p.y = isBoat ? (terrain.water_level ?? -0.4) + 0.05 : sampleTerrainHeight(terrain, p.x, p.z);
+    const prev = g.position.clone();
+    if (!g.visible || prev.distanceTo(p) > 6) g.position.copy(p); else g.position.lerp(p, Math.min(1, dt * 10));
+    g.visible = true;
+    const moveVec = g.position.clone().sub(prev);
+    const spd = moveVec.length() / Math.max(dt, 1e-4);
+    if (moveVec.lengthSq() > 1e-6) g.rotation.y = Math.atan2(-moveVec.z, moveVec.x);
+    const pm = g.userData.patrolMesh;
+    if (pm.userData.wheels) for (const w of pm.userData.wheels) w.rotation.z -= dt * spd * 1.8;
+    if (pm.userData.legs) for (const leg of pm.userData.legs) leg.rotation.z = Math.sin(performance.now() * 0.0085 + leg.userData.phase) * 0.48 * Math.min(1, spd);
+    return true;
+  }
+  return false;
+}
+
+function syncSourceVideo(world) {
+  const pip = document.getElementById("videoPip");
+  const camBtn = document.getElementById("btnCamVideo");
+  const sv = world?.source_video;
+  if (!sv) {
+    pip.hidden = true;
+    camBtn.hidden = true;
+    srcVideoEl.pause();
+    srcVideoEl.removeAttribute("src");
+    srcVideoEl.load();
+    return;
+  }
+  pip.hidden = false;
+  camBtn.hidden = false;
+  document.getElementById("pipTitle").textContent = `${sv.filename} · synced to 3D`;
+  if (!srcVideoEl.src.endsWith(sv.url)) {
+    srcVideoEl.src = sv.url;
+    srcVideoEl.play().catch(() => {});
+  }
+}
+
 function updateAutonomousWorld(t, dt) {
   if (!state.world) return;
   const wind = state.world.atmosphere?.wind_strength ?? 0.5;
@@ -404,6 +496,7 @@ function updateAutonomousWorld(t, dt) {
 
   for (const rt of state.runtimes.values()) {
     const { spec, group } = rt;
+    if (spec.behavior?.kind === "follow_video_path" && updateVideoPathAgent(rt, dt, terrain)) continue;
 
     if (group.userData.waterNormalTex) {
       group.userData.waterNormalTex.offset.x = (t * 0.09) % 1.0;
@@ -1134,7 +1227,7 @@ async function refreshWorldsList() {
     const el = document.createElement("div");
     el.className = "world-chip" + (state.world && state.world.world_id === item.world_id ? " active" : "");
     el.innerHTML = `
-      <div style="font-weight:600;">${item.title}</div>
+      <div style="font-weight:600;">${item.from_video ? "🎬 " : ""}${item.title}</div>
       <div class="mono" style="color:var(--muted);">rev ${item.revision} · ${item.object_count} objs (${item.sdf_count} SDF, ${item.agent_count} agents)</div>
     `;
     el.onclick = async () => {
@@ -1153,7 +1246,7 @@ async function refreshWorldsList() {
 
 function setBusy(flag, elId, msg = "") {
   state.busy = flag;
-  ["btnGenerate", "btnApplyEdit", "btnUndo", "btnRunAudit", "btnEnhancePBR", "btnBakeHero", "btnNeuralStill"].forEach(id => {
+  ["btnGenerate", "btnVideoWorld", "btnVideoSample", "btnApplyEdit", "btnUndo", "btnRunAudit", "btnEnhancePBR", "btnBakeHero", "btnNeuralStill"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.disabled = flag;
   });
@@ -1190,6 +1283,43 @@ document.getElementById("btnGenerate").onclick = async () => {
   } catch (err) {
     setBusy(false, "genStatus", `Error: ${err.message}`);
   }
+};
+
+async function reconstructFromVideo(useSample) {
+  const fileEl = document.getElementById("videoFile");
+  const file = fileEl.files && fileEl.files[0];
+  if (!useSample && !file) {
+    document.getElementById("videoStatus").textContent = "Choose a video file first (or use the sample).";
+    return;
+  }
+  const form = new FormData();
+  if (useSample) form.append("use_sample", "true"); else form.append("file", file);
+  form.append("hint", document.getElementById("videoHint").value.trim());
+  const t0 = performance.now();
+  setBusy(true, "videoStatus", "OpenCV tracking moving objects -> Gemini 4 Carbon reconstructing the 3D scene from frames -> lifting tracks to 3D paths... (1-3 min)");
+  const tick = setInterval(() => {
+    document.getElementById("videoStatus").textContent = `Reconstructing 3D world from video... ${Math.round((performance.now() - t0) / 1000)}s`;
+  }, 1000);
+  try {
+    const r = await fetch("/api/worlds/from-video", { method: "POST", body: form });
+    const world = await r.json();
+    if (!r.ok) throw new Error(world.detail || "Reconstruction failed");
+    await loadFullWorld(world, true);
+    await refreshWorldsList();
+    const nTracks = world.source_video?.tracks?.length || 0;
+    setBusy(false, "videoStatus", `Reconstructed ${world.title}: ${world.objects.length} persistent 3D objects, ${nTracks} video-tracked agents (${Math.round((performance.now() - t0) / 1000)}s). Walk around it, or chat-edit it below.`);
+  } catch (err) {
+    setBusy(false, "videoStatus", `Error: ${err.message}`);
+  } finally {
+    clearInterval(tick);
+  }
+}
+document.getElementById("btnVideoWorld").onclick = () => reconstructFromVideo(false);
+document.getElementById("btnVideoSample").onclick = () => reconstructFromVideo(true);
+document.getElementById("btnPipToggle").onclick = () => {
+  const pip = document.getElementById("videoPip");
+  pip.classList.toggle("collapsed");
+  document.getElementById("btnPipToggle").textContent = pip.classList.contains("collapsed") ? "+" : "–";
 };
 
 document.getElementById("btnApplyEdit").onclick = async () => {
@@ -1323,6 +1453,12 @@ document.getElementById("btnCamOverview").onclick = () => {
   setCameraMode("orbit");
   setOrbitFromLook(new THREE.Vector3(20, 14, 20), new THREE.Vector3(0, 2.0, 0));
 };
+document.getElementById("btnCamVideo").onclick = () => {
+  const sv = state.world?.source_video;
+  if (!sv) return;
+  setCameraMode("orbit");
+  setOrbitFromLook(new THREE.Vector3(...sv.camera_pos), new THREE.Vector3(...sv.camera_look_at));
+};
 document.getElementById("btnCamInspect").onclick = () => {
   if (state.selectedId) inspectObject(state.selectedId);
 };
@@ -1369,6 +1505,10 @@ function animate(now) {
   }
 
   if (state.camMode === "walk") updateWalkCamera(dt);
+  const sv = state.world?.source_video;
+  if (sv) {
+    state.videoTime = srcVideoEl.readyState >= 2 ? srcVideoEl.currentTime : (state.videoTime + dt) % Math.max(sv.duration, 0.5);
+  }
   updateAutonomousWorld(elapsed, dt);
 
   if (state.world) {
