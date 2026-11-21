@@ -36,6 +36,9 @@ def video2sim_redirect():
 
 
 app.mount("/video2sim", video2sim_app, name="video2sim")
+DEMO_DIR = pathlib.Path(__file__).resolve().parent.parent / "demo"
+DEMO_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/demo-assets", StaticFiles(directory=str(DEMO_DIR)), name="demo-assets")
 app.mount("/world-assets", StaticFiles(directory=str(DATA_ROOT)), name="world-assets")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 

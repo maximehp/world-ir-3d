@@ -1,0 +1,103 @@
+{
+  "title": "WorldIR 3D \u2014 Multimodal Demo",
+  "steps": [
+    {
+      "key": "text",
+      "label": "Text",
+      "world_id": "w3d_1df862b1",
+      "modality": "Text prompt \u2192 3D world",
+      "inputs": [
+        {
+          "type": "text",
+          "text": "a small coastal village at sunset with a lighthouse, fishing boats and seagulls"
+        }
+      ],
+      "note": "Gemini 4 Carbon compiles the sentence into a persistent scene graph: terrain, buildings, sculpted SDF meshes and animated agents.",
+      "timing": "create",
+      "view": "aerial"
+    },
+    {
+      "key": "video",
+      "label": "2D Video",
+      "world_id": "w3d_3262e084",
+      "modality": "2D video \u2192 3D world",
+      "inputs": [
+        {
+          "type": "video",
+          "caption": "Source: a 7-second 2D clip (plays top-right, synced to the 3D scene)"
+        }
+      ],
+      "note": "OpenCV tracks every moving object; Carbon rebuilds the scene and estimates the camera; each bird replays its tracked path in 3D.",
+      "timing": "create"
+    },
+    {
+      "key": "plan",
+      "label": "Plan + Photo",
+      "world_id": "w3d_7db41ab1",
+      "modality": "Text + site plan + photo \u2192 Taj Mahal",
+      "inputs": [
+        {
+          "type": "text",
+          "text": "The Taj Mahal at sunrise. Serene, majestic, perfectly symmetrical."
+        },
+        {
+          "type": "image",
+          "src": "/demo-assets/taj/01_taj_site_plan.png",
+          "caption": "Site plan \u2192 layout (where)"
+        },
+        {
+          "type": "image",
+          "src": "/demo-assets/taj/02_taj_reference_photo.jpg",
+          "caption": "Photo \u2192 proportions & look"
+        }
+      ],
+      "note": "Plans decide WHERE things go, photos decide HOW they look. Try Plan View to compare with the drawing.",
+      "timing": "create"
+    },
+    {
+      "key": "neon",
+      "label": "Neon",
+      "world_id": "w3d_0neon_taj",
+      "modality": "Mood board \u2192 restyle the same world",
+      "inputs": [
+        {
+          "type": "image",
+          "src": "/demo-assets/taj/03_moodboard_neon_cyberpunk.jpg",
+          "caption": "Mood board: Neon Agra 2099"
+        }
+      ],
+      "note": "Same layout, same objects: a surgical edit of materials, lighting and atmosphere. Undo returns to marble instantly.",
+      "timing": "edit"
+    },
+    {
+      "key": "ruins",
+      "label": "Reclaimed",
+      "world_id": "w3d_0ruins_taj",
+      "modality": "Mood board \u2192 500 years later",
+      "inputs": [
+        {
+          "type": "image",
+          "src": "/demo-assets/taj/06_moodboard_overgrown_ruins_2500.jpg",
+          "caption": "Mood board: Reclaimed \u00b7 2500"
+        }
+      ],
+      "note": "Mossy marble, banyan roots on the plinth, jungle canopy, parakeets: one image, the whole world re-themed.",
+      "timing": "edit"
+    },
+    {
+      "key": "lava",
+      "label": "Lava Forge",
+      "world_id": "w3d_0lava_taj",
+      "modality": "Mood board \u2192 forged from a volcano",
+      "inputs": [
+        {
+          "type": "image",
+          "src": "/demo-assets/taj/07_moodboard_lava_forge.jpg",
+          "caption": "Mood board: Lava Forge"
+        }
+      ],
+      "note": "Black basalt and molten channels. Press R to ride along with the birds, V for first-person.",
+      "timing": "edit"
+    }
+  ]
+}

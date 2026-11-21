@@ -567,6 +567,99 @@ function renderRefUsage(w, rev) {
   }).join("") + `</div>`;
 }
 
+// ---------------------------------------------------------------------------
+// Guided multimodal demo: show each input (text / 2D video / plans / mood boards) next to the
+// pre-saved world it produced. Nothing is generated live; worlds load instantly from disk.
+// ---------------------------------------------------------------------------
+const demo = { steps: [], idx: -1, token: 0, typing: null };
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+async function startDemo(startIdx = 0) {
+  if (!demo.steps.length) {
+    const r = await fetch("/static/demo.json", { cache: "no-store" });
+    demo.steps = (await r.json()).steps;
+  }
+  document.body.classList.add("demo", "clean", "panels-hidden");
+  document.getElementById("btnClean").textContent = "Studio view";
+  const bar = document.getElementById("demoBar");
+  bar.innerHTML = demo.steps.map((st, i) => `<button type="button" data-i="${i}"><span class="n">${i + 1}</span>${esc(st.label)}</button>`).join("");
+  bar.querySelectorAll("button").forEach(b => b.onclick = () => goDemoStep(Number(b.dataset.i)));
+  bar.hidden = false;
+  setTimeout(resize, 0);
+  await goDemoStep(Math.min(Math.max(0, startIdx), demo.steps.length - 1));
+}
+
+function stopDemo() {
+  document.body.classList.remove("demo", "panels-hidden");
+  document.getElementById("demoBar").hidden = true;
+  document.getElementById("demoInput").hidden = true;
+  clearInterval(demo.typing);
+  demo.idx = -1;
+  setTimeout(resize, 0);
+}
+
+function typeInto(el, text) {
+  clearInterval(demo.typing);
+  el.textContent = "";
+  el.classList.add("typing");
+  let i = 0;
+  demo.typing = setInterval(() => {
+    i += 2;
+    el.textContent = text.slice(0, i);
+    if (i >= text.length) { clearInterval(demo.typing); el.classList.remove("typing"); }
+  }, 28);
+}
+
+async function goDemoStep(i) {
+  const st = demo.steps[i];
+  if (!st) return;
+  demo.idx = i;
+  const token = ++demo.token;
+  document.querySelectorAll("#demoBar button").forEach(b => b.classList.toggle("active", Number(b.dataset.i) === i));
+
+  const panel = document.getElementById("demoInput");
+  const typeTargets = [];
+  let html = `<div class="modality">${i + 1} · ${esc(st.modality)}</div>`;
+  for (const inp of st.inputs) {
+    if (inp.type === "text") {
+      html += `<div class="in-label">Text input</div><div class="prompt" data-type="${typeTargets.length}"></div>`;
+      typeTargets.push(inp.text);
+    } else if (inp.type === "image") {
+      html += `<div class="in-label">Image input</div><img src="${esc(inp.src)}" alt="${esc(inp.caption || "")}"/><div class="cap">${esc(inp.caption || "")}</div>`;
+    } else if (inp.type === "video") {
+      html += `<div class="in-label">Video input</div><div class="cap">${esc(inp.caption || "")}</div>`;
+    }
+  }
+  html += `<div class="arrow">▼ Gemini 4 Carbon → WorldIR</div><div class="result" id="demoResult">Loading saved world…</div><div class="note">${esc(st.note || "")}</div>`;
+  panel.innerHTML = html;
+  panel.hidden = false;
+  panel.querySelectorAll("img").forEach(img => img.onclick = () => {
+    const lb = document.getElementById("lightbox");
+    lb.querySelector("img").src = img.src;
+    lb.hidden = false;
+  });
+  panel.querySelectorAll(".prompt").forEach(el => typeInto(el, typeTargets[Number(el.dataset.type)]));
+
+  const r = await fetch(`/api/worlds/${st.world_id}`);
+  if (token !== demo.token) return;
+  if (!r.ok) { document.getElementById("demoResult").textContent = `Saved world ${st.world_id} not found`; return; }
+  const world = await r.json();
+  if (state.camMode !== "orbit") setCameraMode("orbit");
+  await loadFullWorld(world, true);
+  if (token !== demo.token) return;
+  if (world.source_video) { try { srcVideoEl.currentTime = 0; srcVideoEl.play(); } catch {} }
+  if (st.view === "aerial") document.getElementById("btnCamOverview").click();
+  else if (st.view === "plan") setPlanView(0);
+  const rev = st.timing === "edit" ? world.history[world.history.length - 1] : world.history[0];
+  const secs = rev?.timings?.total_ms ? ` · built in ${Math.round(rev.timings.total_ms / 1000)}s` : "";
+  document.getElementById("demoResult").innerHTML =
+    `→ ${esc(world.title)}<div class="cap">${world.objects.filter(o => o.visible).length} persistent 3D objects${secs} · pre-saved</div>`;
+  refreshWorldsList();
+}
+
+document.getElementById("lightbox").onclick = () => { document.getElementById("lightbox").hidden = true; };
+document.getElementById("btnDemo").onclick = () => (demo.idx >= 0 ? stopDemo() : startDemo(0));
+
 function updateAutonomousWorld(t, dt) {
   if (!state.world) return;
   const wind = state.world.atmosphere?.wind_strength ?? 0.5;
@@ -1263,6 +1356,14 @@ window.addEventListener("keydown", e => {
   if (document.activeElement && ["TEXTAREA", "INPUT"].includes(document.activeElement.tagName)) return;
   if (e.code === "KeyF") { setCameraMode(state.camMode === "walk" ? "orbit" : "walk"); return; }
   if (e.code === "KeyH") { toggleClean(); return; }
+  if (e.code === "KeyD") { demo.idx >= 0 ? stopDemo() : startDemo(0); return; }
+  if (demo.idx >= 0 && state.camMode !== "ride") {
+    if (e.code === "ArrowRight") { goDemoStep(Math.min(demo.idx + 1, demo.steps.length - 1)); return; }
+    if (e.code === "ArrowLeft") { goDemoStep(Math.max(demo.idx - 1, 0)); return; }
+    if (/^Digit[1-9]$/.test(e.code)) { goDemoStep(Number(e.code.slice(5)) - 1); return; }
+    if (e.code === "KeyI") { const p = document.getElementById("demoInput"); p.hidden = !p.hidden; return; }
+  }
+  if (e.code === "Escape" && !document.getElementById("lightbox").hidden) { document.getElementById("lightbox").hidden = true; return; }
   if (e.code === "KeyP") { document.body.classList.toggle("panels-hidden"); setTimeout(resize, 0); return; }
   if (e.code === "KeyR" && state.camMode !== "ride") { startRide(state.selectedId); return; }
   if (state.camMode === "ride") {
@@ -1806,6 +1907,7 @@ async function applyHashView() {
   const hp = new URLSearchParams(location.hash.slice(1));
   const v = hp.get("view");
   if (hp.get("studio") === "1") toggleClean(false);
+  if (hp.get("demo")) { await startDemo(Number(hp.get("demo")) - 1 || 0); return; }
   const wid = hp.get("world");
   if (wid && state.world?.world_id !== wid) {
     const r = await fetch(`/api/worlds/${wid}`);
