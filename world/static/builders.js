@@ -194,6 +194,17 @@ function loadClampTex(url, isColor) {
   return tex;
 }
 
+// Emissive roles: "body" surfaces keep only a faint glow so neon/night styles read as dark materials with
+// glowing trim, "trim" surfaces (cornices, frames, bands, rims) carry the boosted neon glow.
+function emissiveForRole(options, matSpec) {
+  if (options.emissiveIntensity !== undefined) return options.emissiveIntensity;
+  const base = matSpec.emissive_intensity ?? 0.0;
+  if (options.emissiveRole === "body") return base * 0.18;
+  if (options.emissiveRole === "recess") return base * 0.55;
+  if (options.emissiveRole === "trim") return base > 0.02 ? Math.min(3.2, Math.max(1.4, base * 3.0)) : 0.0;
+  return base;
+}
+
 export function createPBRMaterial(matSpec, texturesDict, options = {}) {
   const color = new THREE.Color(options.overrideColor || matSpec.color || "#c8b8a2");
   const repeat = options.repeat ?? matSpec.texture_repeat ?? 2.0;
@@ -204,7 +215,7 @@ export function createPBRMaterial(matSpec, texturesDict, options = {}) {
     roughness: options.roughness ?? matSpec.roughness ?? 0.76,
     metalness: options.metalness ?? matSpec.metalness ?? 0.05,
     emissive: new THREE.Color(options.emissive ?? matSpec.emissive ?? "#000000"),
-    emissiveIntensity: options.emissiveIntensity ?? matSpec.emissive_intensity ?? 0.0,
+    emissiveIntensity: emissiveForRole(options, matSpec),
     envMapIntensity: options.envMapIntensity ?? 0.85,
   };
   const texAsset = !options.noTexture && texId ? texturesDict[texId] : null;
@@ -974,8 +985,8 @@ function buildArchway(obj, texturesDict) {
   const w = Math.max(3.6, p.width || 5.4);
   const h = Math.max(3.6, p.height || 5.0);
   const d = Math.max(1.0, p.depth || 1.6);
-  const mat = createPBRMaterial(obj.material, texturesDict, { repeat: 2.0, normalStrength: 1.2 });
-  const trim = createPBRMaterial(obj.material, texturesDict, { overrideColor: obj.material.secondary_color || "#8d8272", repeat: 1.5, tintWeight: 0.5 });
+  const mat = createPBRMaterial(obj.material, texturesDict, { repeat: 2.0, normalStrength: 1.2, emissiveRole: "body" });
+  const trim = createPBRMaterial(obj.material, texturesDict, { overrideColor: obj.material.secondary_color || "#8d8272", repeat: 1.5, tintWeight: 0.5, emissiveRole: "trim" });
 
   const pierW = w * 0.22;
   const span = w - pierW * 2;
@@ -1327,11 +1338,388 @@ function buildLighthouse(obj) {
   return enableShadows(g);
 }
 
+// ---------------------------------------------------------------------------
+// Monumental Architecture Kit: domed_hall, minaret, reflecting_pool, platform
+// (Mughal / Islamic / classical landmark vocabulary: onion & hemispherical lathe domes,
+//  pointed-arch iwans set in pishtaq frames, chhatri pavilions, guldasta pinnacles)
+// ---------------------------------------------------------------------------
+const ONION_PROFILE = [
+  [1.0, 0.0], [1.1, 0.08], [1.19, 0.2], [1.22, 0.33], [1.17, 0.46], [1.03, 0.58],
+  [0.82, 0.69], [0.58, 0.79], [0.36, 0.87], [0.19, 0.93], [0.08, 0.975], [0.0, 1.0],
+];
+
+function domeGeometry(baseR, h, style = "onion", segs = 56) {
+  let pts;
+  if (style === "hemisphere") {
+    pts = [];
+    for (let i = 0; i <= 16; i++) {
+      const a = (i / 16) * Math.PI / 2;
+      pts.push(new THREE.Vector2(Math.max(0.0001, Math.cos(a) * baseR), Math.sin(a) * h));
+    }
+  } else {
+    const curve = new THREE.SplineCurve(ONION_PROFILE.map(([r, y]) => new THREE.Vector2(r * baseR, y * h)));
+    pts = curve.getPoints(40).map(v => new THREE.Vector2(Math.max(0.0001, v.x), v.y));
+  }
+  const geo = new THREE.LatheGeometry(pts, segs);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+function pointedArchShape(w, h) {
+  const hs = Math.max(h * 0.25, h - w * 0.62);
+  const s = new THREE.Shape();
+  s.moveTo(-w / 2, 0);
+  s.lineTo(-w / 2, hs);
+  s.quadraticCurveTo(-w / 2, hs + w * 0.42, 0, h);
+  s.quadraticCurveTo(w / 2, hs + w * 0.42, w / 2, hs);
+  s.lineTo(w / 2, 0);
+  s.closePath();
+  return s;
+}
+
+function archPanel(w, h, depth, mat) {
+  const geo = new THREE.ExtrudeGeometry(pointedArchShape(w, h), { depth, bevelEnabled: false, curveSegments: 10 });
+  return new THREE.Mesh(geo, mat);
+}
+
+function goldMaterial(obj) {
+  return new THREE.MeshStandardMaterial({
+    color: obj.material.accent_color || "#d8b15a", metalness: 0.92, roughness: 0.22, envMapIntensity: 1.6,
+  });
+}
+
+function shadeMaterial(obj, texturesDict, factor) {
+  const c = new THREE.Color(obj.material.color || "#eeeae2").multiplyScalar(factor);
+  return createPBRMaterial(obj.material, texturesDict, { overrideColor: "#" + c.getHexString(), roughness: 0.9, tintWeight: 0.6, emissiveRole: "recess" });
+}
+
+function finial(obj, h) {
+  const g = new THREE.Group();
+  const gold = goldMaterial(obj);
+  const spike = new THREE.Mesh(new THREE.CylinderGeometry(h * 0.018, h * 0.05, h, 10), gold);
+  spike.position.y = h / 2;
+  g.add(spike);
+  [0.22, 0.42, 0.6].forEach((t, i) => {
+    const b = new THREE.Mesh(new THREE.SphereGeometry(h * (0.11 - i * 0.025), 14, 10), gold);
+    b.position.y = h * t;
+    g.add(b);
+  });
+  const crescent = new THREE.Mesh(new THREE.TorusGeometry(h * 0.09, h * 0.018, 6, 16, Math.PI * 1.3), gold);
+  crescent.position.y = h * 0.86;
+  crescent.rotation.z = Math.PI * 0.85;
+  g.add(crescent);
+  return g;
+}
+
+function chhatri(obj, texturesDict, r, colH, domeStyle = "onion") {
+  const g = new THREE.Group();
+  const stone = createPBRMaterial(obj.material, texturesDict, { repeat: 1.0, roughness: 0.5, emissiveRole: "body" });
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(r * 1.12, r * 1.18, r * 0.25, 8), stone);
+  base.position.y = r * 0.125;
+  g.add(base);
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
+    const c = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.07, r * 0.08, colH, 8), stone);
+    c.position.set(Math.cos(a) * r * 0.92, r * 0.25 + colH / 2, Math.sin(a) * r * 0.92);
+    g.add(c);
+  }
+  const eave = new THREE.Mesh(new THREE.CylinderGeometry(r * 1.22, r * 1.05, r * 0.16, 8), stone);
+  eave.position.y = r * 0.25 + colH + r * 0.08;
+  g.add(eave);
+  const dome = new THREE.Mesh(domeGeometry(r * 0.88, r * 1.35, domeStyle, 32), stone);
+  dome.position.y = r * 0.25 + colH + r * 0.16;
+  g.add(dome);
+  const f = finial(obj, r * 0.7);
+  f.position.y = dome.position.y + r * 1.3;
+  g.add(f);
+  return g;
+}
+
+function buildDomedHall(obj, texturesDict) {
+  const p = obj.parametric;
+  const g = new THREE.Group();
+  const W = Math.max(6, p.width || 12);
+  const H = Math.max(8, p.height || 16);
+  const style = p.dome_style || "onion";
+  const hb = H * 0.42;           // main body height
+  const c = W * 0.17;            // chamfer
+  addContactAO(g, W * 0.62, W * 0.62, 0.7);
+
+  const marble = createPBRMaterial(obj.material, texturesDict, { repeat: 3.0, roughness: 0.42, normalStrength: 0.6, envMapIntensity: 1.1, emissiveRole: "body" });
+  const frameMat = createPBRMaterial(obj.material, texturesDict, {
+    overrideColor: obj.material.secondary_color || "#b9a98d", repeat: 2.0, roughness: 0.5, tintWeight: 0.55, emissiveRole: "trim",
+  });
+  const recess = shadeMaterial(obj, texturesDict, 0.42);
+  const recessDeep = shadeMaterial(obj, texturesDict, 0.26);
+
+  // Chamfered-square body (extruded octagon)
+  const hw = W / 2;
+  const sh = new THREE.Shape();
+  sh.moveTo(-hw + c, -hw); sh.lineTo(hw - c, -hw); sh.lineTo(hw, -hw + c); sh.lineTo(hw, hw - c);
+  sh.lineTo(hw - c, hw); sh.lineTo(-hw + c, hw); sh.lineTo(-hw, hw - c); sh.lineTo(-hw, -hw + c); sh.closePath();
+  const bodyGeo = new THREE.ExtrudeGeometry(sh, { depth: hb, bevelEnabled: false });
+  bodyGeo.rotateX(-Math.PI / 2);
+  const body = new THREE.Mesh(bodyGeo, marble);
+  g.add(body);
+  // Cornice band
+  const corniceGeo = new THREE.ExtrudeGeometry(sh, { depth: hb * 0.035, bevelEnabled: false });
+  corniceGeo.rotateX(-Math.PI / 2);
+  const cornice = new THREE.Mesh(corniceGeo, frameMat);
+  cornice.scale.set(1.025, 1, 1.025);
+  cornice.position.y = hb * 0.965;
+  g.add(cornice);
+
+  // Four facades: pishtaq frame + great iwan + stacked side arches
+  for (let k = 0; k < 4; k++) {
+    const face = new THREE.Group();
+    face.rotation.y = (k * Math.PI) / 2;
+    const pw = W * 0.44, ph = hb * 1.08;
+    const pish = new THREE.Mesh(new THREE.BoxGeometry(pw, ph, W * 0.03), marble);
+    pish.position.set(0, ph / 2, hw + W * 0.012);
+    face.add(pish);
+    const pishTrim = new THREE.Mesh(new THREE.BoxGeometry(pw * 1.02, ph * 0.03, W * 0.035), frameMat);
+    pishTrim.position.set(0, ph, hw + W * 0.012);
+    face.add(pishTrim);
+    const outer = archPanel(pw * 0.74, ph * 0.86, 0.02, frameMat);
+    outer.position.set(0, 0, hw + W * 0.028);
+    face.add(outer);
+    const iwan = archPanel(pw * 0.64, ph * 0.8, 0.03, recess);
+    iwan.position.set(0, 0, hw + W * 0.03);
+    face.add(iwan);
+    const door = archPanel(pw * 0.26, ph * 0.36, 0.035, recessDeep);
+    door.position.set(0, 0, hw + W * 0.032);
+    face.add(door);
+    // Side bays on the flat face, two levels
+    for (const sx of [-1, 1]) {
+      for (const lvl of [0, 1]) {
+        const a = archPanel(W * 0.085, hb * 0.36, 0.03, recess);
+        a.position.set(sx * W * 0.31, hb * (0.06 + lvl * 0.47), hw + 0.005);
+        face.add(a);
+      }
+    }
+    // Chamfer face arches (two levels)
+    const ch = new THREE.Group();
+    ch.position.set(hw - c / 2, 0, hw - c / 2);
+    ch.rotation.y = Math.PI / 4;
+    for (const lvl of [0, 1]) {
+      const a = archPanel(c * 0.8, hb * 0.36, 0.03, recess);
+      a.position.set(0, hb * (0.06 + lvl * 0.47), 0.01);
+      ch.add(a);
+    }
+    face.add(ch);
+    // Guldasta pinnacles at chamfer corners
+    for (const sx of [-1, 1]) {
+      const pin = new THREE.Mesh(new THREE.CylinderGeometry(W * 0.012, W * 0.016, hb * 0.3, 8), marble);
+      pin.position.set(sx * (hw - c), hb + hb * 0.15, hw);
+      face.add(pin);
+      const bud = new THREE.Mesh(domeGeometry(W * 0.02, W * 0.05, "onion", 12), marble);
+      bud.position.set(sx * (hw - c), hb * 1.3, hw);
+      face.add(bud);
+    }
+    g.add(face);
+  }
+
+  // Drum + great dome + finial
+  const Rd = W * 0.25;
+  const drumH = H * 0.075;
+  const drum = new THREE.Mesh(new THREE.CylinderGeometry(Rd, Rd * 1.03, drumH, 48), marble);
+  drum.position.y = hb + drumH / 2;
+  g.add(drum);
+  const drumBand = new THREE.Mesh(new THREE.CylinderGeometry(Rd * 1.04, Rd * 1.04, drumH * 0.12, 48), frameMat);
+  drumBand.position.y = hb + drumH * 0.94;
+  g.add(drumBand);
+  const domeH = style === "hemisphere" ? Rd * 0.95 : H * 0.36;
+  const dome = new THREE.Mesh(domeGeometry(Rd * 1.0, domeH, style, 64), marble);
+  dome.position.y = hb + drumH;
+  g.add(dome);
+  const lotus = new THREE.Mesh(new THREE.CylinderGeometry(Rd * 0.06, Rd * 0.14, domeH * 0.05, 16), frameMat);
+  lotus.position.y = hb + drumH + domeH * 0.985;
+  g.add(lotus);
+  const f = finial(obj, H * 0.085);
+  f.position.y = hb + drumH + domeH;
+  g.add(f);
+
+  // Four corner chhatris
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    const k = chhatri(obj, texturesDict, W * 0.075, H * 0.085, style);
+    k.position.set(sx * W * 0.33, hb, sz * W * 0.33);
+    g.add(k);
+  }
+  return enableShadows(g);
+}
+
+function buildMinaret(obj, texturesDict) {
+  const p = obj.parametric;
+  const g = new THREE.Group();
+  const H = Math.max(6, p.height || 14);
+  const w = Math.max(0.8, Math.min(p.width || 1.6, H * 0.16));
+  addContactAO(g, w * 1.1, w * 1.1, 0.7);
+  const marble = createPBRMaterial(obj.material, texturesDict, { repeat: 1.5, roughness: 0.42, normalStrength: 0.6, envMapIntensity: 1.1, emissiveRole: "body" });
+  const trim = createPBRMaterial(obj.material, texturesDict, {
+    overrideColor: obj.material.secondary_color || "#b9a98d", repeat: 1.0, roughness: 0.5, tintWeight: 0.55, emissiveRole: "trim",
+  });
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(w * 0.78, w * 0.85, H * 0.06, 8), marble);
+  base.position.y = H * 0.03;
+  g.add(base);
+  const levels = [0.06, 0.36, 0.62, 0.84];
+  const radii = [w * 0.5, w * 0.45, w * 0.4, w * 0.36];
+  for (let i = 0; i < 3; i++) {
+    const y0 = H * levels[i], y1 = H * levels[i + 1];
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(radii[i + 1], radii[i], y1 - y0, 24), marble);
+    shaft.position.y = (y0 + y1) / 2;
+    g.add(shaft);
+    for (let b = 1; b <= 2; b++) {
+      const band = new THREE.Mesh(new THREE.CylinderGeometry(radii[i] * 1.01, radii[i] * 1.01, H * 0.006, 24), trim);
+      band.position.y = y0 + (y1 - y0) * (b / 3);
+      g.add(band);
+    }
+    // Balcony with corbel ring and rail
+    const by = y1;
+    const corbel = new THREE.Mesh(new THREE.CylinderGeometry(radii[i + 1] * 1.55, radii[i + 1] * 1.02, H * 0.025, 24), marble);
+    corbel.position.y = by - H * 0.0125;
+    g.add(corbel);
+    const deck = new THREE.Mesh(new THREE.CylinderGeometry(radii[i + 1] * 1.6, radii[i + 1] * 1.6, H * 0.008, 24), trim);
+    deck.position.y = by;
+    g.add(deck);
+    const rail = new THREE.Mesh(new THREE.TorusGeometry(radii[i + 1] * 1.55, w * 0.03, 6, 28), marble);
+    rail.rotation.x = Math.PI / 2;
+    rail.position.y = by + H * 0.022;
+    g.add(rail);
+  }
+  const k = chhatri(obj, texturesDict, radii[3] * 1.25, H * 0.055, p.dome_style || "onion");
+  k.position.y = H * 0.84;
+  g.add(k);
+  return enableShadows(g);
+}
+
+function buildReflectingPool(obj, texturesDict) {
+  const p = obj.parametric;
+  const g = new THREE.Group();
+  const W = Math.max(1.2, p.width || 3);
+  const L = Math.max(4, p.depth || 20);
+  const stone = createPBRMaterial(obj.material, texturesDict, { repeat: 2.0, roughness: 0.55, emissiveRole: "recess" });
+  const walkMat = createPBRMaterial(obj.material, texturesDict, {
+    overrideColor: obj.material.secondary_color || "#d9cfbf", repeat: 6, roughness: 0.7, tintWeight: 0.5, emissiveRole: "body",
+  });
+  const walkW = Math.max(1.2, W * 0.6);
+  for (const sx of [-1, 1]) {
+    const walk = new THREE.Mesh(new THREE.BoxGeometry(walkW, 0.08, L + 0.8), walkMat);
+    walk.position.set(sx * (W / 2 + 0.3 + walkW / 2), 0.04, 0);
+    g.add(walk);
+  }
+  const rimH = 0.34, rimT = 0.3;
+  const rims = [
+    [W + rimT * 2, rimT, 0, L / 2 + rimT / 2], [W + rimT * 2, rimT, 0, -L / 2 - rimT / 2],
+    [rimT, L, W / 2 + rimT / 2, 0], [rimT, L, -W / 2 - rimT / 2, 0],
+  ];
+  for (const [sx, sz, x, z] of rims) {
+    const r = new THREE.Mesh(new THREE.BoxGeometry(sx, rimH, sz), stone);
+    r.position.set(x, rimH / 2, z);
+    g.add(r);
+  }
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(W, 0.06, L), new THREE.MeshStandardMaterial({ color: "#163845", roughness: 0.9 }));
+  floor.position.y = 0.03;
+  g.add(floor);
+  const wNorm = getWaterNormalMap().clone();
+  wNorm.needsUpdate = true;
+  wNorm.repeat.set(Math.max(1, W / 2), Math.max(2, L / 2));
+  const water = new THREE.Mesh(
+    new THREE.PlaneGeometry(W, L),
+    new THREE.MeshPhysicalMaterial({
+      // Water takes the accent hue but stays deep so it reflects rather than glows
+      color: new THREE.Color(obj.material.accent_color && obj.material.accent_color !== "#ffd584" ? obj.material.accent_color : "#2c6f86").multiplyScalar(0.5),
+      roughness: 0.02, metalness: 0.2, clearcoat: 1.0, clearcoatRoughness: 0.03,
+      normalMap: wNorm, normalScale: new THREE.Vector2(0.18, 0.18), envMapIntensity: 2.1, transparent: true, opacity: 0.93,
+    })
+  );
+  water.rotation.x = -Math.PI / 2;
+  water.position.y = rimH - 0.07;
+  water.receiveShadow = true;
+  g.add(water);
+  // Central line of fountain jets
+  const drops = [];
+  const dropGeo = new THREE.SphereGeometry(0.045, 6, 6);
+  const dropMat = new THREE.MeshPhysicalMaterial({ color: "#e6fbff", emissive: "#6ab9d4", emissiveIntensity: 0.2, roughness: 0.04, transparent: true, opacity: 0.82 });
+  const nJets = Math.max(2, Math.min(14, Math.floor(L / 2.6)));
+  for (let j = 0; j < nJets; j++) {
+    const oz = -L / 2 + (L / nJets) * (j + 0.5);
+    const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 0.12, 8), stone);
+    nozzle.position.set(0, rimH - 0.04, oz);
+    g.add(nozzle);
+    for (let k = 0; k < 6; k++) {
+      const m = new THREE.Mesh(dropGeo, dropMat);
+      m.userData = { ang: k * 1.05 + j, phase: k / 6, radius: 0.22, topY: rimH + 0.55, poolY: rimH - 0.07, ox: 0, oz };
+      g.add(m);
+      drops.push(m);
+    }
+  }
+  g.userData.waterDrops = drops;
+  g.userData.waterNormalTex = wNorm;
+  enableShadows(g);
+  water.castShadow = false;
+  return g;
+}
+
+function buildPlatform(obj, texturesDict) {
+  const p = obj.parametric;
+  const g = new THREE.Group();
+  const W = Math.max(2, p.width || 20);
+  const D = Math.max(2, p.depth || 20);
+  const H = Math.max(0.3, Math.min(p.height || 1.4, 6));
+  addContactAO(g, W * 0.55, D * 0.55, 0.6);
+  const stone = createPBRMaterial(obj.material, texturesDict, { repeat: Math.max(2, W / 6), roughness: 0.55, emissiveRole: "body" });
+  const trim = createPBRMaterial(obj.material, texturesDict, {
+    overrideColor: obj.material.secondary_color || "#cfc3ae", repeat: 2, roughness: 0.6, tintWeight: 0.5, emissiveRole: "trim",
+  });
+  const recess = shadeMaterial(obj, texturesDict, 0.5);
+  const body = new THREE.Mesh(new THREE.BoxGeometry(W, H, D), stone);
+  body.position.y = H / 2;
+  g.add(body);
+  const cap = new THREE.Mesh(new THREE.BoxGeometry(W + 0.3, Math.min(0.16, H * 0.12), D + 0.3), trim);
+  cap.position.y = H;
+  g.add(cap);
+  const plinth = new THREE.Mesh(new THREE.BoxGeometry(W + 0.24, Math.min(0.2, H * 0.14), D + 0.24), trim);
+  plinth.position.y = Math.min(0.1, H * 0.07);
+  g.add(plinth);
+  // Blind arcade along all four sides
+  if (H >= 0.8) {
+    const ah = H * 0.62, aw = Math.min(1.4, ah * 0.62);
+    const sides = [[W, D / 2, 0], [W, -D / 2, Math.PI], [D, W / 2, Math.PI / 2], [D, -W / 2, -Math.PI / 2]];
+    for (const [len, off, rot] of sides) {
+      const side = new THREE.Group();
+      side.rotation.y = rot;
+      const n = Math.max(1, Math.floor(len / (aw * 1.7)));
+      for (let i = 0; i < n; i++) {
+        const x = -len / 2 + (len / n) * (i + 0.5);
+        if (rot === 0 && Math.abs(x) < Math.min(W * 0.14, 2.6)) continue; // leave room for steps
+        const a = archPanel(aw, ah, 0.02, recess);
+        a.position.set(x, H * 0.16, Math.abs(off) + 0.005);
+        side.add(a);
+      }
+      g.add(side);
+    }
+  }
+  // Front steps (+Z)
+  const sw = Math.min(W * 0.24, 5);
+  const nSteps = Math.max(2, Math.round(H / 0.22));
+  for (let i = 0; i < nSteps; i++) {
+    const sh = (H / nSteps) * (i + 1);
+    const st = new THREE.Mesh(new THREE.BoxGeometry(sw, sh, 0.36), trim);
+    st.position.set(0, sh / 2, D / 2 + 0.18 + (nSteps - 1 - i) * 0.36);
+    g.add(st);
+  }
+  return enableShadows(g);
+}
+
 export function buildParametricObject(obj, texturesDict, isNight) {
   const k = obj.parametric?.kind || "building";
   switch (k) {
     case "building": return buildBuilding(obj, texturesDict, isNight);
     case "tower": return buildTower(obj, texturesDict, isNight);
+    case "domed_hall": return buildDomedHall(obj, texturesDict);
+    case "minaret": return buildMinaret(obj, texturesDict);
+    case "reflecting_pool": return buildReflectingPool(obj, texturesDict);
+    case "platform": return buildPlatform(obj, texturesDict);
     case "fountain": return buildFountain(obj, texturesDict);
     case "tree": return buildTree(obj);
     case "archway":
@@ -1595,14 +1983,23 @@ export function buildArticulatedAgent(obj, texturesDict) {
     const n = Math.max(2, Math.min(14, ag.count || 6));
     const paperMat = new THREE.MeshStandardMaterial({
       color: obj.material.color || "#ff9e44",
-      emissive: new THREE.Color(obj.material.accent_color || "#ffae3d"),
-      emissiveIntensity: 2.2,
+      emissive: new THREE.Color(obj.material.color || "#ff9e44").lerp(new THREE.Color(obj.material.accent_color || "#ffae3d"), 0.35),
+      emissiveIntensity: 1.15,
       roughness: 0.6,
+      transparent: true,
+      opacity: 0.94,
     });
+    const capMat = new THREE.MeshStandardMaterial({ color: "#2b211b", roughness: 0.7, metalness: 0.3 });
     for (let i = 0; i < n; i++) {
       const lg = new THREE.Group();
-      const cyl = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.2, 0.58, 8), paperMat);
+      const cyl = new THREE.Mesh(new THREE.SphereGeometry(0.3, 14, 10), paperMat);
+      cyl.scale.set(1, 1.25, 1);
       lg.add(cyl);
+      for (const yy of [0.36, -0.36]) {
+        const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.06, 10), capMat);
+        cap.position.y = yy;
+        lg.add(cap);
+      }
       if (i < 3) {
         const pl = new THREE.PointLight("#ffad42", 7, 10, 1.8);
         lg.add(pl);

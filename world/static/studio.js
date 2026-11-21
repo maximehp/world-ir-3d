@@ -7,6 +7,10 @@
  */
 
 import * as THREE from "./vendor/three.module.min.js";
+import { EffectComposer } from "./vendor/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "./vendor/addons/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "./vendor/addons/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "./vendor/addons/postprocessing/OutputPass.js";
 import {
   buildArticulatedAgent,
   buildImplicitSDFObject,
@@ -29,6 +33,13 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(54, 16 / 9, 0.15, 280);
+
+// Post-processing: HDR render -> selective-by-threshold bloom -> ACES tone map + sRGB output
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloomPass = new UnrealBloomPass(new THREE.Vector2(1024, 576), 0.3, 0.5, 0.9);
+composer.addPass(bloomPass);
+composer.addPass(new OutputPass());
 camera.position.set(0, 4.8, 22);
 
 // Primary Sun / Moon directional shadow light
@@ -209,8 +220,20 @@ function applyAtmosphere(atm) {
   skyUniforms.uSunDir.value.copy(sunDir);
   skyUniforms.uSunColor.value.set(atm.sun_color || "#ffeed2");
 
-  scene.fog = new THREE.FogExp2(atm.fog_color || "#dfc9ae", atm.fog_density ?? 0.0075);
-  renderer.toneMappingExposure = isNight ? 1.15 : 0.96;
+  // Scale-aware fog: never hide more than ~25% of the hero subject at the camera's look distance
+  let fogDensity = atm.fog_density ?? 0.0075;
+  const w = state.world;
+  if (w?.camera_spawn && w?.camera_look_at) {
+    const lookDist = Math.hypot(...w.camera_spawn.map((v, i) => v - w.camera_look_at[i]));
+    fogDensity = Math.min(fogDensity, 0.536 / Math.max(lookDist, 12));
+  }
+  scene.fog = new THREE.FogExp2(atm.fog_color || "#dfc9ae", fogDensity);
+  renderer.toneMappingExposure = atm.time_of_day === "night" ? 1.15 : atm.time_of_day === "dusk" ? 1.0 : 0.96;
+  // Adaptive bloom: neon / lantern / window glow at night, a soft highlight bloom by day
+  const glowy = atm.time_of_day === "night" ? 1 : atm.time_of_day === "dusk" ? 0.7 : 0;
+  bloomPass.strength = 0.1 + 0.8 * glowy;
+  bloomPass.radius = 0.45 + 0.2 * glowy;
+  bloomPass.threshold = atm.time_of_day === "night" ? 0.72 : atm.time_of_day === "dusk" ? 0.86 : 0.92;
 
   rebuildClouds(atm.cloud_count ?? 8, atm);
   refreshEnvironmentIBL();
@@ -578,7 +601,7 @@ function updateAutonomousWorld(t, dt) {
         const u = (d.phase + t * 0.85) % 1.0;
         const r = u * d.radius;
         const arcY = d.topY + 0.95 * u - (0.95 + (d.topY - d.poolY)) * u * u;
-        drop.position.set(Math.cos(d.ang) * r, Math.max(d.poolY, arcY), Math.sin(d.ang) * r);
+        drop.position.set((d.ox || 0) + Math.cos(d.ang) * r, Math.max(d.poolY, arcY), (d.oz || 0) + Math.sin(d.ang) * r);
       }
     }
 
@@ -1121,6 +1144,7 @@ function rideHudHtml() {
 
 function setCameraMode(mode) {
   if (state.ride) stopRide();
+  state.inPlanView = false;
   state.camMode = mode;
   document.getElementById("btnOrbitMode").classList.toggle("active", mode === "orbit");
   document.getElementById("btnWalkMode").classList.toggle("active", mode === "walk");
@@ -1753,12 +1777,17 @@ document.getElementById("btnCamVideo").onclick = () => {
   setCameraMode("orbit");
   setOrbitFromLook(new THREE.Vector3(...sv.camera_pos), new THREE.Vector3(...sv.camera_look_at));
 };
-function setPlanView() {
+let planRotDeg = 0;
+function setPlanView(rotDeg = planRotDeg) {
   setCameraMode("orbit");
+  planRotDeg = ((rotDeg % 360) + 360) % 360;
   const half = (state.world?.terrain?.size || 72) * 0.36;
-  setOrbitFromLook(new THREE.Vector3(0, half * 1.9, 1.2), new THREE.Vector3(0, 0, 0));
+  const a = THREE.MathUtils.degToRad(planRotDeg);
+  setOrbitFromLook(new THREE.Vector3(Math.sin(a) * 1.2, half * 1.9, Math.cos(a) * 1.2), new THREE.Vector3(0, 0, 0));
+  state.inPlanView = true;
 }
-document.getElementById("btnCamPlan").onclick = setPlanView;
+// Click again while in Plan View to rotate 90° (align with an uploaded plan's orientation)
+document.getElementById("btnCamPlan").onclick = () => setPlanView(state.inPlanView ? planRotDeg + 90 : planRotDeg);
 document.getElementById("btnRide").onclick = () => {
   if (state.camMode === "ride") setCameraMode("orbit");
   else if (!startRide(state.selectedId)) document.getElementById("vpHud").textContent = "No moving agents in this world to ride.";
@@ -1772,7 +1801,7 @@ async function applyHashView() {
     const r = await fetch(`/api/worlds/${wid}`);
     if (r.ok) { await loadFullWorld(await r.json(), true); refreshWorldsList(); }
   }
-  if (v === "plan") setPlanView();
+  if (v === "plan") setPlanView(Number(hp.get("rot") || 0));
   else if (v === "aerial") document.getElementById("btnCamOverview").click();
   else if (v === "video") document.getElementById("btnCamVideo").click();
   else if (v === "ride" || v === "ride-pov") { startRide(hp.get("agent")); if (state.ride && v === "ride-pov") state.ride.view = "pov"; }
@@ -1789,6 +1818,7 @@ function resize() {
   const w = Math.max(1, parent.clientWidth);
   const h = Math.max(1, parent.clientHeight);
   renderer.setSize(w, h, false);
+  composer.setSize(w, h);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }
@@ -1841,7 +1871,7 @@ function animate(now) {
       `Orbit: Drag/Zoom/Click | Walk: <b>F</b> + WASD + Mouse`;
   }
 
-  renderer.render(scene, camera);
+  composer.render();
   requestAnimationFrame(animate);
 }
 

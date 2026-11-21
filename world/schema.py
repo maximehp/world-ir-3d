@@ -95,13 +95,18 @@ class ParametricSpec(BaseModel):
         "scooter",
         "car",
         "boat",
+        "domed_hall",
+        "minaret",
+        "reflecting_pool",
+        "platform",
     ]
-    width: float = Field(default=4.5, ge=0.4, le=18.0)
+    width: float = Field(default=4.5, ge=0.4, le=48.0)
     height: float = Field(default=5.2, ge=0.4, le=24.0)
-    depth: float = Field(default=4.2, ge=0.4, le=18.0)
+    depth: float = Field(default=4.2, ge=0.4, le=48.0)
     floors: int = Field(default=2, ge=1, le=6)
     roof_style: Literal["gable", "hip", "cone", "dome", "flat"] = "gable"
     tree_style: Literal["oak", "pine", "cypress", "blossom", "palm"] = "oak"
+    dome_style: Literal["onion", "hemisphere"] = Field(default="onion", description="Dome profile for domed_hall / minaret chhatris")
     seed: int = Field(default=42, ge=1, le=9999)
     has_balcony: bool = False
     has_chimney: bool = False
