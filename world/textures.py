@@ -1,8 +1,10 @@
 """Nano Banana 2.1 Seamless PBR Material Texture Synthesizer.
 
 Generates tileable albedo textures with Nano Banana 2.1, enforces seamless edges via
-cosine-feathered toroidal crossfade, and deterministically derives matching
-Tangent-Space Normal Maps and Roughness Maps in ~15 ms with OpenCV.
+cosine-feathered toroidal crossfade, and deterministically derives matching:
+  - Tangent-Space Normal Map (wrap-padded Sobel gradients)
+  - Roughness Map (micro-contrast & crevice variance)
+  - Multi-Scale Cavity Ambient Occlusion Map (aoMap)
 """
 
 from __future__ import annotations
@@ -31,16 +33,14 @@ def _get_client() -> genai.Client:
     return genai.Client(api_key=key)
 
 
-def make_seamless_tile(rgb: np.ndarray, blend_frac: float = 0.16) -> np.ndarray:
+def make_seamless_tile(rgb: np.ndarray, blend_frac: float = 0.14) -> np.ndarray:
     """Enforce guaranteed seamless tiling along both X and Y borders via half-shift cosine blending."""
     h, w, _ = rgb.shape
     img = rgb.astype(np.float32)
 
-    # Shift image by half-width and half-height so original borders lie in center, then feather-blend
     shifted = np.roll(np.roll(img, h // 2, axis=0), w // 2, axis=1)
     yy = np.linspace(-1.0, 1.0, h, dtype=np.float32)[:, None]
     xx = np.linspace(-1.0, 1.0, w, dtype=np.float32)[None, :]
-    # Raised diamond/cosine window: 1.0 in center, 0.0 at edges
     wx = np.clip((1.0 - np.abs(xx)) / max(blend_frac, 0.05), 0.0, 1.0)
     wy = np.clip((1.0 - np.abs(yy)) / max(blend_frac, 0.05), 0.0, 1.0)
     wx = 0.5 - 0.5 * np.cos(wx * np.pi)
@@ -50,11 +50,11 @@ def make_seamless_tile(rgb: np.ndarray, blend_frac: float = 0.16) -> np.ndarray:
     return np.clip(blended, 0, 255).astype(np.uint8)
 
 
-def derive_normal_and_roughness(albedo_rgb: np.ndarray, strength: float = 2.6) -> tuple[np.ndarray, np.ndarray]:
-    """Deterministically compute tangent-space normal map + roughness map from seamless albedo."""
+def derive_pbr_maps(albedo_rgb: np.ndarray, strength: float = 3.2) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Deterministically compute tangent-space normal map, roughness map, and cavity AO map from seamless albedo."""
     gray = cv2.cvtColor(albedo_rgb, cv2.COLOR_RGB2GRAY).astype(np.float32) / 255.0
-    # Slight Gaussian pre-smooth reduces JPEG block noise in normal map
-    height = cv2.GaussianBlur(gray, (3, 3), 0.6)
+    # Slight Gaussian pre-smooth reduces compression grain in normal map
+    height = cv2.GaussianBlur(gray, (3, 3), 0.55)
 
     # Toroidal wrap padding guarantees seamless normal tiling across texture borders
     padded = np.pad(height, 1, mode="wrap")
@@ -67,12 +67,33 @@ def derive_normal_and_roughness(albedo_rgb: np.ndarray, strength: float = 2.6) -
     nz = (dz * inv_len) * 0.5 + 0.5
     normal_rgb = np.clip(np.dstack([nx, ny, nz]) * 255.0, 0, 255).astype(np.uint8)
 
-    # Roughness: darker crevices & high-frequency micro-contrast -> rougher; smooth bright highlights -> glossier
-    local_mean = cv2.GaussianBlur(gray, (9, 9), 2.0)
+    # Roughness: darker crevices & high-frequency micro-contrast -> rougher
+    pad_l = np.pad(gray, 8, mode="wrap")
+    local_mean = cv2.GaussianBlur(pad_l, (17, 17), 3.0)[8:-8, 8:-8]
     micro_var = np.abs(gray - local_mean)
-    rough = np.clip(0.86 - 0.32 * gray + 0.65 * micro_var, 0.25, 0.96)
+    rough = np.clip(0.84 - 0.30 * gray + 0.72 * micro_var, 0.24, 0.96)
     rough_u8 = (rough * 255.0).astype(np.uint8)
+
+    # Multi-scale Cavity Ambient Occlusion (darkens mortar seams, tile laps, bark grooves)
+    pad_ao = np.pad(gray, 16, mode="wrap")
+    broad_mean = cv2.GaussianBlur(pad_ao, (33, 33), 7.5)[16:-16, 16:-16]
+    cavity = np.clip((gray + 0.08) / (broad_mean + 0.10), 0.42, 1.08)
+    ao = np.clip(0.32 + 0.68 * np.minimum(cavity, 1.0), 0.35, 1.0)
+    ao_u8 = (ao * 255.0).astype(np.uint8)
+    return normal_rgb, rough_u8, ao_u8
+
+
+def derive_normal_and_roughness(albedo_rgb: np.ndarray, strength: float = 3.2) -> tuple[np.ndarray, np.ndarray]:
+    """Backwards-compatible helper returning (normal_rgb, rough_u8)."""
+    normal_rgb, rough_u8, _ = derive_pbr_maps(albedo_rgb, strength=strength)
     return normal_rgb, rough_u8
+
+
+def ensure_ao_for_existing_albedo(albedo_path: pathlib.Path, ao_path: pathlib.Path) -> None:
+    """Derive AO (and refresh crisp normal map if needed) from an existing albedo on disk (0 API calls)."""
+    rgb = np.asarray(Image.open(albedo_path).convert("RGB"))
+    _, _, ao_u8 = derive_pbr_maps(rgb)
+    Image.fromarray(ao_u8).save(ao_path, quality=88)
 
 
 def synthesize_pbr_texture(
@@ -81,12 +102,13 @@ def synthesize_pbr_texture(
     out_dir: pathlib.Path,
     size: int = 512,
 ) -> tuple[dict, float]:
-    """Generate a seamless tileable PBR texture set (albedo + normal + roughness) via Nano Banana 2.1."""
+    """Generate a seamless tileable PBR texture set (albedo + normal + roughness + AO) via Nano Banana 2.1."""
     client = _get_client()
     full_prompt = (
-        f"Seamless tileable 2D PBR albedo surface texture of: {material_prompt}. "
+        f"Photorealistic seamless tileable 2D PBR albedo surface texture of: {material_prompt}. "
         "Strictly orthographic flat top-down view, completely uniform even diffuse lighting, "
-        "NO directional shadows, NO perspective distortion, NO objects or borders, edge-to-edge repeating material pattern."
+        "crisp natural tactile micro-detail, NO directional shadows, NO perspective distortion, "
+        "NO objects or borders, edge-to-edge repeating material pattern."
     )
     t0 = time.perf_counter()
     resp = client.models.generate_content(
@@ -106,25 +128,27 @@ def synthesize_pbr_texture(
     if raw_img is None:
         raise RuntimeError(f"Nano Banana returned no texture for {tex_id}")
 
-    # Center-crop square and resize to power-of-two 512x512 for crisp GPU mipmapping
     side = min(raw_img.width, raw_img.height)
     x0 = (raw_img.width - side) // 2
     y0 = (raw_img.height - side) // 2
     sq = raw_img.crop((x0, y0, x0 + side, y0 + side)).resize((size, size), Image.Resampling.LANCZOS)
 
     seamless = make_seamless_tile(np.asarray(sq))
-    normal_rgb, rough_u8 = derive_normal_and_roughness(seamless)
+    normal_rgb, rough_u8, ao_u8 = derive_pbr_maps(seamless)
 
     albedo_name = f"tex_{tex_id}_albedo.jpg"
     normal_name = f"tex_{tex_id}_normal.jpg"
     rough_name = f"tex_{tex_id}_rough.jpg"
+    ao_name = f"tex_{tex_id}_ao.jpg"
 
-    Image.fromarray(seamless).save(out_dir / albedo_name, quality=90)
+    Image.fromarray(seamless).save(out_dir / albedo_name, quality=92)
     Image.fromarray(normal_rgb).save(out_dir / normal_name, quality=90)
     Image.fromarray(rough_u8).save(out_dir / rough_name, quality=88)
+    Image.fromarray(ao_u8).save(out_dir / ao_name, quality=88)
 
     return {
         "albedo_name": albedo_name,
         "normal_name": normal_name,
         "rough_name": rough_name,
+        "ao_name": ao_name,
     }, ms

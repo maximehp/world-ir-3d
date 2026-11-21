@@ -293,6 +293,20 @@
       </div>
 
       <div class="card">
+        <div class="card-title">3. Appearance Fidelity Lab (WorldIR Authoritative)</div>
+        <div class="row">
+          <button id="btnEnhancePBR" title="Approach A: Add persistent roof tile & hill biome PBR + cavity AO + 3D SDF-AO">A: Upgrade PBR + SDF-AO</button>
+        </div>
+        <div class="row">
+          <button id="btnBakeHero" title="Approach B: 1 Nano Banana call in object space -> permanent 360° dual-projected SDF detail">B: Bake 360° SDF Hero (1 Call)</button>
+        </div>
+        <div class="row">
+          <button id="btnNeuralStill" title="Approach C: Still-frame G-Buffer-conditioned Nano Banana render from current camera">C: G-Buffer Neural Still</button>
+        </div>
+        <div id="fidelityStatus" class="status"></div>
+      </div>
+
+      <div class="card">
         <div class="card-title">Saved 3D Worlds</div>
         <div id="worldsList" style="display:flex; flex-direction:column; gap:5px;">
           <div style="color:var(--muted);">No worlds generated yet.</div>

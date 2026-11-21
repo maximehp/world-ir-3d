@@ -27,6 +27,7 @@ class MaterialSpec(BaseModel):
     emissive: str = Field(default="#000000", description="Optional emissive glow hex")
     emissive_intensity: float = Field(default=0.0, ge=0.0, le=3.0)
     texture_id: str | None = Field(default=None, description="ID of a Nano Banana generated seamless PBR texture")
+    roof_texture_id: str | None = Field(default=None, description="Optional PBR texture ID for roof tiles / secondary surfaces")
     texture_repeat: float = Field(default=2.0, ge=0.5, le=16.0)
 
 
@@ -36,6 +37,7 @@ class PBRTextureAsset(BaseModel):
     albedo_url: str
     normal_url: str
     roughness_url: str
+    ao_url: str | None = None
     source: Literal["nano_banana_pbr", "procedural"] = "nano_banana_pbr"
 
 
@@ -54,6 +56,7 @@ class TerrainSpec(BaseModel):
     water_level: float = Field(default=-0.4, ge=-3.0, le=2.0)
     water_color: str = "#2a6f8f"
     texture_id: str | None = None
+    hill_texture_id: str | None = None
 
 
 class AtmosphereSpec(BaseModel):
@@ -129,6 +132,12 @@ class ImplicitSDFSpec(BaseModel):
     mesh_url: str | None = Field(default=None, description="Compiled Marching Cubes mesh JSON URL")
     vertex_count: int = 0
     face_count: int = 0
+    # Optional Approach B: Persistent Object-Space Dual-Projection Neural Baked Detail (1 call -> 360 deg @ 60 FPS)
+    baked_front_url: str | None = None
+    baked_back_url: str | None = None
+    baked_front_normal_url: str | None = None
+    baked_back_normal_url: str | None = None
+    baked_prompt: str | None = None
 
 
 # ---------------------------------------------------------------------------

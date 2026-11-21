@@ -11,8 +11,9 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
-# Generated runtime world assets (large textures, SDF meshes, audit plates)
+# Generated runtime world assets & raw benchmark outputs
 world/data/worlds/
+world/data/benchmarks/
 
 # Superseded 2.5D prototype artifacts (retained locally, excluded from 3D repo)
 app/

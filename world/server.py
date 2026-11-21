@@ -41,6 +41,22 @@ class MultiViewAuditReq(BaseModel):
     allow_repair: bool = True
 
 
+class BakeSDFReq(BaseModel):
+    front_b64: str
+    back_b64: str
+    style_hint: str | None = None
+
+
+class NeuralRenderReq(BaseModel):
+    tag: str = "view"
+    mode: str = "gbuffer_conditioned"
+    rgb_b64: str
+    depth_b64: str | None = None
+    normal_b64: str | None = None
+    obj_id_b64: str | None = None
+    style_ref_b64: str | None = None
+
+
 @app.get("/")
 def index():
     return FileResponse(STATIC_DIR / "index.html")
@@ -125,3 +141,49 @@ def undo_world(world_id: str):
         return world.model_dump()
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+
+
+@app.post("/api/worlds/{world_id}/enhance-materials")
+def enhance_materials(world_id: str):
+    """Approach A: Upgrade persistent PBR textures (roofs, hill splat, cavity AO) + 3D SDF-AO."""
+    try:
+        world, info = world_manager.enhance_world_materials(world_id)
+        return {"world": world.model_dump(), "enhancement": info}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Material enhancement failed: {exc}")
+
+
+@app.post("/api/worlds/{world_id}/objects/{object_id}/bake-neural")
+def bake_object_neural(world_id: str, object_id: str, req: BakeSDFReq):
+    """Approach B: Spend 1 Nano Banana call in object space to bake persistent 360° dual-projected SDF detail."""
+    try:
+        world, info = world_manager.bake_sdf_object_neural(
+            world_id, object_id, req.front_b64, req.back_b64, style_hint=req.style_hint
+        )
+        return {"world": world.model_dump(), "bake": info}
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Neural object bake failed: {exc}")
+
+
+@app.post("/api/worlds/{world_id}/neural-render")
+def neural_render_still(world_id: str, req: NeuralRenderReq):
+    """Approach C: Experimental G-Buffer-conditioned neural still enhancement."""
+    try:
+        return world_manager.neural_render_view(
+            world_id=world_id,
+            tag=req.tag,
+            rgb_b64=req.rgb_b64,
+            mode=req.mode,
+            depth_b64=req.depth_b64,
+            normal_b64=req.normal_b64,
+            obj_id_b64=req.obj_id_b64,
+            style_ref_b64=req.style_ref_b64,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Neural render failed: {exc}")
