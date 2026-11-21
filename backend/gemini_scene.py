@@ -27,15 +27,24 @@ COORDINATE SYSTEM (strictly follow this!):
   (Objects lower in the 2D frame are closer to the camera, i.e. larger/more positive Z.)
 
 GUIDELINES:
-1. Extract exact hex colors from the image for sky_top_color, sky_bottom_color, ground_color, sun, mountains, water, paths, house walls/roof/door/window, tree trunks/foliage.
-2. Place every visible mountain peak, water body (pond/lake), dirt/stone path, house/building, and tree/bush accurately so that from the default camera the 3D scene mirrors the 2D video composition, while having true 3D depth when the user orbits around!
-3. For dynamic_entities:
+1. Extract exact hex colors from the image for sky_top_color, sky_bottom_color, ground_color, sun, mountains, water, paths, buildings, domes, marble/sandstone walls, tree trunks/foliage.
+2. For MONUMENTAL / ARCHITECTURAL SCENES (like the Taj Mahal, palaces, mosques, temples, courtyards, formal gardens):
+   - Decompose the complete architectural complex into modular 3D structures!
+   - Use `kind="plinth"` for raised marble/stone terraces or platforms (`elevation_y=0`, `height=2..3.5`).
+   - Place the main monument (`kind="mausoleum"` or `"palace"` or `"mosque"`) on top of the plinth by setting `elevation_y` equal to the plinth's height, with `roof_style="onion_dome"` or `"dome"`, `has_chhatris=true` if corner pavilions exist, and `dome_color`/`accent_color` matching the marble/gold/sandstone trim.
+   - Add corner towers/minarets as individual `kind="minaret"` structures (`num_balconies=3`, `elevation_y` matching the plinth height) at the 4 corners so the user can inspect and customize each minaret individually!
+   - Add flanking buildings (e.g. red sandstone Mosque & Jawab pavilions) on the left and right (`kind="mosque"` or `"pavilion"`, `rotation_y` facing inward toward the courtyard).
+   - For formal reflecting pools, use `WaterBodySpec` with `shape="rectangle"`, `has_fountains=true`, and `fountain_count=5..9`.
+   - For symmetrical garden avenues, place rows of `kind="cypress"` trees along the pool and crisp `PathSpec` walkways dividing the lawns.
+   - For ANCIENT PYRAMIDS / DESERT MONUMENTS (like the Pyramids of Giza): use `kind="pyramid"` (set `has_chhatris=true` to add a smooth limestone capstone like Khafre's Pyramid!), `kind="sphinx"`, `kind="ruins"` for mortuary temples/mastabas, sandy desert `ground_color`, warm golden-hour `sky_bottom_color`, and winding desert causeway `PathSpec` roads.
+   - Add `kind="person"` dynamic entities strolling along the walkways if visitors are visible.
+3. For NATURAL / STYLIZED LANDSCAPES:
+   - Place every visible mountain peak, water body (pond/lake), dirt/stone path, house/building, and tree/bush accurately so that from the default camera the 3D scene mirrors the 2D video composition, while having true 3D depth when the user orbits around!
+4. For dynamic_entities:
    - You will be given a list of OpenCV-tracked moving trajectories (with IDs like "traj_1", "traj_2", ...).
-   - For each meaningful moving object visible in the video (e.g., flying birds, clouds, cars, boats), create a DynamicEntitySpec and set its `trajectory_id` to the matching OpenCV trajectory ID!
-   - Spread their `depth_z` slightly (e.g., -6, -2, +2) so they fly in true 3D parallax rather than flat on one plane.
-   - Choose appropriate `kind` ("bird", "cloud", "boat", "car", "fish", "butterfly", "floating_orb") and `flap_speed` (e.g. 7-11 for birds).
-4. Make sure paths have at least 3-5 smooth (x, z) waypoints along the ground plane.
-5. Do not invent objects that aren't in the video, and do not omit prominent objects that ARE in the video.
+   - For each meaningful moving object visible in the video (e.g., flying birds, clouds, cars, boats, strolling people), create a DynamicEntitySpec and set its `trajectory_id` to the matching OpenCV trajectory ID (or provide a `fallback_path` if the camera itself is moving/panning).
+   - Spread bird `depth_z` slightly (e.g., -6, -2, +2) so they fly in true 3D parallax.
+5. Make sure paths have at least 2-6 smooth (x, z) waypoints along the ground plane.
 """
 
 

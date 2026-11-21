@@ -56,16 +56,20 @@ def health():
 async def analyze_video(
     file: Optional[UploadFile] = File(default=None),
     use_sample: bool = Form(default=False),
+    sample_name: Optional[str] = Form(default=None),
     mode: str = Form(default="auto"),
     api_key: Optional[str] = Form(default=None),
     model: str = Form(default="gemini-2.5-flash"),
 ):
     if use_sample:
-        if not SAMPLE_VIDEO.exists():
+        chosen = SAMPLES_DIR / (sample_name or SAMPLE_VIDEO.name)
+        if not chosen.exists() or chosen.parent.resolve() != SAMPLES_DIR.resolve():
+            chosen = SAMPLE_VIDEO
+        if not chosen.exists():
             raise HTTPException(status_code=404, detail="Sample video not found on server.")
-        video_path = SAMPLE_VIDEO
-        filename = SAMPLE_VIDEO.name
-        video_url = f"/media/samples/{SAMPLE_VIDEO.name}"
+        video_path = chosen
+        filename = chosen.name
+        video_url = f"/media/samples/{chosen.name}"
     elif file is not None:
         ext = Path(file.filename or "upload.mp4").suffix.lower() or ".mp4"
         if ext not in {".mp4", ".webm", ".mov", ".avi", ".mkv"}:

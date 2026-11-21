@@ -41,7 +41,7 @@ class EnvironmentSpec(BaseModel):
     sky_bottom_color: str = "#a8daf5"
     ground_color: str = "#5a8c49"
     fog_color: str = "#9ecce8"
-    fog_density: float = 0.006
+    fog_density: float = 0.0055
     sun: SunSpec = Field(default_factory=SunSpec)
     wind_strength: float = Field(0.5, ge=0.0, le=2.0)
     time_of_day: Literal["dawn", "day", "sunset", "night"] = "day"
@@ -67,6 +67,8 @@ class WaterBodySpec(BaseModel):
     water_color: str = "#4f94c4"
     shore_color: str = "#d9ecfa"
     ripple_intensity: float = 0.6
+    has_fountains: bool = False
+    fountain_count: int = 0
 
 
 class PathSpec(BaseModel):
@@ -76,26 +78,64 @@ class PathSpec(BaseModel):
     color: str = "#c9b38c"
 
 
+class InteriorSpec(BaseModel):
+    enabled: bool = False
+    preset: Literal["hasht_bihisht", "mosque_hall", "house_rooms", "pyramid_chambers"] = "hasht_bihisht"
+    view_mode: Literal["exterior", "cutaway", "floorplan", "xray"] = "cutaway"
+    cutaway_ratio: float = Field(0.5, ge=0.0, le=1.0)
+    show_double_dome: bool = True
+    show_rooms: bool = True
+    show_cenotaphs: bool = True
+    show_crypt: bool = True
+    show_lights: bool = True
+    marble_color: str = "#efe9dc"
+    vault_color: str = "#dfd4be"
+    floor_color: str = "#e5dcc8"
+
+
 class StructureSpec(BaseModel):
     id: str
-    kind: Literal["house", "cabin", "tower", "barn", "building"] = "house"
+    kind: Literal[
+        "house",
+        "cabin",
+        "tower",
+        "barn",
+        "building",
+        "mausoleum",
+        "mosque",
+        "palace",
+        "minaret",
+        "archway",
+        "plinth",
+        "pavilion",
+        "pyramid",
+        "sphinx",
+        "ruins",
+    ] = "house"
     x: float
     z: float
+    elevation_y: float = Field(0.0, description="Vertical base elevation (e.g. sitting atop a raised plinth)")
     width: float = 7.5
     height: float = 5.2
     depth: float = 6.2
     rotation_y: float = 0.0
     wall_color: str = "#f0deb4"
     roof_color: str = "#b84b39"
-    roof_style: Literal["gable", "pyramid", "flat"] = "gable"
+    roof_style: Literal["gable", "pyramid", "flat", "onion_dome", "dome", "chhatri"] = "gable"
+    dome_color: Optional[str] = None
+    accent_color: Optional[str] = None
     door_color: str = "#6e442c"
     window_color: str = "#8fd3f4"
     has_chimney: bool = False
+    has_chhatris: bool = False
+    num_arches: int = 3
+    num_balconies: int = 3
+    interior: Optional[InteriorSpec] = None
 
 
 class VegetationSpec(BaseModel):
     id: str
-    kind: Literal["round_tree", "pine_tree", "bush", "rock"] = "round_tree"
+    kind: Literal["round_tree", "pine_tree", "cypress", "bush", "rock"] = "round_tree"
     x: float
     z: float
     scale: float = 1.0
@@ -107,7 +147,7 @@ class VegetationSpec(BaseModel):
 
 class DynamicEntitySpec(BaseModel):
     id: str
-    kind: Literal["bird", "cloud", "boat", "car", "fish", "butterfly", "floating_orb"] = "bird"
+    kind: Literal["bird", "cloud", "boat", "car", "fish", "butterfly", "floating_orb", "person"] = "bird"
     color: str = "#1f2428"
     accent_color: str = "#3c454d"
     scale: float = 1.0
@@ -123,7 +163,7 @@ class DynamicEntitySpec(BaseModel):
         0.0,
         description="Optional vertical offset in world units",
     )
-    flap_speed: float = Field(8.0, description="Animation cycle speed (e.g. wing flaps/sec)")
+    flap_speed: float = Field(8.0, description="Animation cycle speed (e.g. wing flaps/sec or walk cycle)")
     fallback_path: Optional[List[Vec3]] = Field(
         None,
         description="3D looping waypoints if no OpenCV trajectory_id is attached",
@@ -131,7 +171,7 @@ class DynamicEntitySpec(BaseModel):
 
 
 class SceneGraph(BaseModel):
-    title: str = "3D Reconstructed Landscape"
+    title: str = "3D Reconstructed Scene"
     description: str = "Interactive 3D simulation reconstructed from 2D video."
     environment: EnvironmentSpec = Field(default_factory=EnvironmentSpec)
     mountains: List[MountainSpec] = Field(default_factory=list)

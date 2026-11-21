@@ -3,9 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Video2Sim 3D — 2D Video to Interactive 3D Simulation</title>
-    <script type="module" crossorigin src="/assets/index-Do25Tui8.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-Cp91vFhp.css">
+    <title>Video2Sim 3D — Interactive 3D Reconstruction &amp; Customization Studio</title>
+    <script type="module" crossorigin src="/assets/index-tXSVZ4g4.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-9B80OFEc.css">
   </head>
   <body>
     <div id="app">
@@ -14,14 +14,22 @@
         <div class="brand">
           <div class="brand-icon">3D</div>
           <div>
-            <h1>Video2Sim 3D</h1>
-            <span class="subtitle">OpenCV + Gemini Vision → Live Three.js Simulation</span>
+            <h1>Video2Sim 3D Studio</h1>
+            <span class="subtitle">2D Video → Full 3D Rendered &amp; Customizable World</span>
           </div>
         </div>
 
         <div class="topbar-controls">
-          <button id="btn-sample" class="btn btn-accent" title="Analyze the bundled sample landscape video">
-            ▶ Load Sample Video
+          <button id="btn-sample" class="btn btn-accent" title="Analyze the bundled landscape video">
+            ▶ Landscape
+          </button>
+
+          <button id="btn-sample-taj" class="btn btn-accent" title="Analyze the bundled Taj Mahal architectural video">
+            🏛 Taj Mahal
+          </button>
+
+          <button id="btn-sample-pyramids" class="btn btn-accent" title="Analyze the bundled Pyramids of Giza video">
+            ▲ Pyramids
           </button>
 
           <label class="btn btn-secondary file-btn">
@@ -53,9 +61,18 @@
 
       <!-- Main Workspace -->
       <main id="workspace" class="workspace">
-        <!-- 3D Viewport -->
         <section class="viewport-3d" id="viewport-3d">
           <canvas id="sim-canvas"></canvas>
+
+          <!-- Top-Left 3D Studio Gizmo Toolbar -->
+          <div class="gizmo-toolbar" id="gizmo-toolbar">
+            <button class="tool-btn active" data-tool="select" title="Click to select objects">↖ Select</button>
+            <button class="tool-btn" data-tool="translate" title="Drag 3D Move Gizmo (G)">✥ Move</button>
+            <button class="tool-btn" data-tool="rotate" title="Drag 3D Rotate Gizmo (R)">↻ Rotate</button>
+            <span class="tool-sep"></span>
+            <button id="btn-flight-paths" class="tool-btn" title="Show 3D bird flight trajectories">〰 Paths</button>
+            <button id="btn-wireframe" class="tool-btn" title="Toggle 3D wireframe mesh view">▦ Wire</button>
+          </div>
 
           <!-- Status / Loading Overlay -->
           <div id="loading-overlay" class="loading-overlay hidden">
@@ -69,7 +86,7 @@
 
           <!-- Hint pill -->
           <div class="hint-pill">
-            Drag to orbit · Scroll to zoom · Right-drag to pan · Click water to drop ripples
+            Click any 3D object to customize · Drag to orbit · Click pond for ripples
           </div>
 
           <!-- Picture-in-Picture / Split 2D Source Video Panel -->
@@ -85,50 +102,127 @@
             <div id="video-meta" class="video-meta"></div>
           </aside>
 
-          <!-- Floating Right Simulation Controls -->
+          <!-- Floating Right 3D Customization Studio Panel -->
           <aside class="sim-controls" id="sim-controls">
-            <div class="control-section">
-              <div class="section-label">Camera Presets</div>
-              <div class="preset-grid">
-                <button class="preset-btn active" data-cam="match">2D Match</button>
-                <button class="preset-btn" data-cam="iso">Isometric</button>
-                <button class="preset-btn" data-cam="top">Bird's Eye</button>
-                <button class="preset-btn" data-cam="bird">Follow Bird</button>
+            <div class="panel-tabs">
+              <button class="tab-btn active" data-tab="customize">✦ Customize</button>
+              <button class="tab-btn" data-tab="environment">☀ World</button>
+              <button class="tab-btn" data-tab="export">⤓ Scene</button>
+            </div>
+
+            <!-- TAB 1: Object Customizer -->
+            <div class="tab-pane active" id="tab-customize">
+              <div class="control-section">
+                <div class="section-label">Add 3D Object</div>
+                <div class="add-grid">
+                  <button class="mini-btn" data-add="vegetation">+ Tree</button>
+                  <button class="mini-btn" data-add="structures">+ House</button>
+                  <button class="mini-btn" data-add="mountains">+ Peak</button>
+                  <button class="mini-btn" data-add="water_bodies">+ Pond</button>
+                  <button class="mini-btn" data-add="dynamic_entities">+ Bird</button>
+                </div>
+              </div>
+
+              <div class="control-section">
+                <div class="section-label">Selected 3D Object</div>
+                <select id="object-select" class="select-input full-select">
+                  <option value="">— Click any 3D object or pick here —</option>
+                </select>
+              </div>
+
+              <div id="object-inspector" class="inspector-body">
+                <div class="empty-hint">
+                  Click any <b>house</b>, <b>tree</b>, <b>mountain</b>, <b>pond</b>, <b>path</b>, or <b>bird</b> in the 3D scene to edit its position, size, style, and colors live!
+                </div>
               </div>
             </div>
 
-            <div class="control-section">
-              <div class="section-label">
-                <span>Time of Day</span>
-                <span id="val-tod" class="val-badge">13:00</span>
+            <!-- TAB 2: World / Environment -->
+            <div class="tab-pane" id="tab-environment">
+              <div class="control-section">
+                <div class="section-label">Camera Presets</div>
+                <div class="preset-grid">
+                  <button class="preset-btn active" data-cam="match">2D Match</button>
+                  <button class="preset-btn" data-cam="iso">Isometric</button>
+                  <button class="preset-btn" data-cam="top">Bird's Eye</button>
+                  <button class="preset-btn" data-cam="bird">Follow Bird</button>
+                </div>
               </div>
-              <input id="slider-tod" type="range" min="0" max="24" step="0.1" value="13.0" />
+
+              <div class="control-section">
+                <div class="section-label">
+                  <span>Time of Day</span>
+                  <span id="val-tod" class="val-badge">13:00</span>
+                </div>
+                <input id="slider-tod" type="range" min="0" max="24" step="0.1" value="13.0" />
+              </div>
+
+              <div class="control-section">
+                <div class="section-label">
+                  <span>Wind &amp; Sway</span>
+                  <span id="val-wind" class="val-badge">0.7x</span>
+                </div>
+                <input id="slider-wind" type="range" min="0" max="2" step="0.05" value="0.7" />
+              </div>
+
+              <div class="control-section">
+                <div class="section-label">
+                  <span>Simulation Speed</span>
+                  <span id="val-speed" class="val-badge">1.0x</span>
+                </div>
+                <input id="slider-speed" type="range" min="0" max="2.5" step="0.1" value="1.0" />
+              </div>
+
+              <div class="control-section">
+                <div class="section-label">Atmosphere &amp; Colors</div>
+                <div class="prop-row">
+                  <span>Sky Top</span>
+                  <input id="env-sky-top" type="color" value="#5aaae6" />
+                </div>
+                <div class="prop-row">
+                  <span>Sky Horizon</span>
+                  <input id="env-sky-bot" type="color" value="#a8daf5" />
+                </div>
+                <div class="prop-row">
+                  <span>Ground Grass</span>
+                  <input id="env-ground" type="color" value="#5a8c49" />
+                </div>
+                <div class="prop-row">
+                  <span>Sun Color</span>
+                  <input id="env-sun-col" type="color" value="#ffe87c" />
+                </div>
+                <div class="prop-row">
+                  <span>Fog Density</span>
+                  <input id="env-fog" type="range" min="0" max="0.025" step="0.001" value="0.0055" />
+                </div>
+              </div>
             </div>
 
-            <div class="control-section">
-              <div class="section-label">
-                <span>Wind &amp; Sway</span>
-                <span id="val-wind" class="val-badge">0.7x</span>
+            <!-- TAB 3: Scene / Export -->
+            <div class="tab-pane" id="tab-export">
+              <div class="control-section">
+                <div class="section-label">Scene Summary</div>
+                <div id="scene-stats" class="scene-stats">
+                  Load the sample video or upload your own 2D video to generate a live 3D simulation.
+                </div>
               </div>
-              <input id="slider-wind" type="range" min="0" max="2" step="0.05" value="0.7" />
-            </div>
 
-            <div class="control-section">
-              <div class="section-label">
-                <span>Simulation Speed</span>
-                <span id="val-speed" class="val-badge">1.0x</span>
+              <div class="control-section">
+                <div class="section-label">Export &amp; Save</div>
+                <button id="btn-export-glb" class="btn btn-accent full-width">
+                  ⤓ Export 3D Model (.GLB)
+                </button>
+                <button id="btn-export-json" class="btn btn-secondary full-width">
+                  ⤓ Download Scene JSON
+                </button>
+                <label class="btn btn-secondary full-width file-btn">
+                  ↑ Import Scene JSON
+                  <input id="import-json-input" type="file" accept="application/json,.json" hidden />
+                </label>
+                <button id="btn-json" class="btn btn-ghost full-width">
+                  { } Inspect Scene Graph JSON
+                </button>
               </div>
-              <input id="slider-speed" type="range" min="0" max="2.5" step="0.1" value="1.0" />
-            </div>
-
-            <div class="control-section">
-              <div class="section-label">Scene Summary</div>
-              <div id="scene-stats" class="scene-stats">
-                Load the sample video or upload your own 2D video to generate a live 3D simulation.
-              </div>
-              <button id="btn-json" class="btn btn-ghost full-width" disabled>
-                { } Inspect Scene Graph JSON
-              </button>
             </div>
           </aside>
         </section>
