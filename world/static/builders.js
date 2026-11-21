@@ -1597,9 +1597,16 @@ function buildReflectingPool(obj, texturesDict) {
   const g = new THREE.Group();
   const W = Math.max(1.2, p.width || 3);
   const L = Math.max(4, p.depth || 20);
-  const stone = createPBRMaterial(obj.material, texturesDict, { repeat: 2.0, roughness: 0.55, emissiveRole: "recess" });
+  // Molten mode: a strongly emissive WARM hue (lava / fire / molten metal) turns the liquid into glowing magma
+  const em = new THREE.Color(obj.material.emissive || "#000000");
+  const hsl = {}; em.getHSL(hsl);
+  const molten = (obj.material.emissive_intensity || 0) >= 0.6 && hsl.s > 0.4 && hsl.l > 0.2 && (hsl.h < 0.12 || hsl.h > 0.95);
+  const stone = createPBRMaterial(obj.material, texturesDict, molten
+    ? { repeat: 2.0, roughness: 0.7, emissiveIntensity: 0 }
+    : { repeat: 2.0, roughness: 0.55, emissiveRole: "recess" });
   const walkMat = createPBRMaterial(obj.material, texturesDict, {
-    overrideColor: obj.material.secondary_color || "#d9cfbf", repeat: 6, roughness: 0.7, tintWeight: 0.5, emissiveRole: "body",
+    overrideColor: molten ? obj.material.color : (obj.material.secondary_color || "#d9cfbf"), repeat: 6, roughness: 0.7, tintWeight: 0.5,
+    ...(molten ? { emissiveIntensity: 0 } : { emissiveRole: "body" }),
   });
   const walkW = Math.max(1.2, W * 0.6);
   for (const sx of [-1, 1]) {
@@ -1632,6 +1639,13 @@ function buildReflectingPool(obj, texturesDict) {
       normalMap: wNorm, normalScale: new THREE.Vector2(0.18, 0.18), envMapIntensity: 2.1, transparent: true, opacity: 0.93,
     })
   );
+  if (molten) {
+    water.material = new THREE.MeshStandardMaterial({
+      color: "#2a0e05", emissive: em, emissiveIntensity: Math.min(1.5, obj.material.emissive_intensity * 0.65),
+      roughness: 0.55, metalness: 0.1, normalMap: wNorm, normalScale: new THREE.Vector2(0.9, 0.9),
+    });
+    wNorm.repeat.set(Math.max(1, W / 3), Math.max(2, L / 3));
+  }
   water.rotation.x = -Math.PI / 2;
   water.position.y = rimH - 0.07;
   water.receiveShadow = true;
