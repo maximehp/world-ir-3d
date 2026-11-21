@@ -1139,7 +1139,8 @@ function rideHudHtml() {
   const status = r.waiting ? `<span style="color:#f5b14c;">waiting for it to re-enter the video frame…</span>` : `${(r.speed * 3.6).toFixed(0)} km/h`;
   return `<b>🎥 Riding: ${name}</b> · ${r.view === "pov" ? "FIRST-PERSON" : "CHASE"}${tracked}<br/>` +
     `${status}<br/>` +
-    `<b>V</b> switch view · <b>N</b>/<b>B</b> next/prev agent · drag look · scroll zoom · <b>Esc</b> exit`;
+    (document.body.classList.contains("clean") ? `<b>V</b> view · <b>N</b> next · <b>Esc</b> exit` :
+    `<b>V</b> switch view · <b>N</b>/<b>B</b> next/prev agent · drag look · scroll zoom · <b>Esc</b> exit`);
 }
 
 function setCameraMode(mode) {
@@ -1261,6 +1262,8 @@ canvas.addEventListener("wheel", e => {
 window.addEventListener("keydown", e => {
   if (document.activeElement && ["TEXTAREA", "INPUT"].includes(document.activeElement.tagName)) return;
   if (e.code === "KeyF") { setCameraMode(state.camMode === "walk" ? "orbit" : "walk"); return; }
+  if (e.code === "KeyH") { toggleClean(); return; }
+  if (e.code === "KeyP") { document.body.classList.toggle("panels-hidden"); setTimeout(resize, 0); return; }
   if (e.code === "KeyR" && state.camMode !== "ride") { startRide(state.selectedId); return; }
   if (state.camMode === "ride") {
     if (e.code === "Escape") { setCameraMode("orbit"); return; }
@@ -1788,6 +1791,12 @@ function setPlanView(rotDeg = planRotDeg) {
 }
 // Click again while in Plan View to rotate 90° (align with an uploaded plan's orientation)
 document.getElementById("btnCamPlan").onclick = () => setPlanView(state.inPlanView ? planRotDeg + 90 : planRotDeg);
+function toggleClean(force) {
+  const on = document.body.classList.toggle("clean", force);
+  document.getElementById("btnClean").textContent = on ? "Studio view" : "Clean view";
+  setTimeout(resize, 0);
+}
+document.getElementById("btnClean").onclick = () => toggleClean();
 document.getElementById("btnRide").onclick = () => {
   if (state.camMode === "ride") setCameraMode("orbit");
   else if (!startRide(state.selectedId)) document.getElementById("vpHud").textContent = "No moving agents in this world to ride.";
@@ -1796,6 +1805,7 @@ document.getElementById("btnRide").onclick = () => {
 async function applyHashView() {
   const hp = new URLSearchParams(location.hash.slice(1));
   const v = hp.get("view");
+  if (hp.get("studio") === "1") toggleClean(false);
   const wid = hp.get("world");
   if (wid && state.world?.world_id !== wid) {
     const r = await fetch(`/api/worlds/${wid}`);
@@ -1863,6 +1873,8 @@ function animate(now) {
 
   if (state.world && state.camMode === "ride" && state.ride) {
     document.getElementById("vpHud").innerHTML = rideHudHtml();
+  } else if (state.world && document.body.classList.contains("clean")) {
+    document.getElementById("vpHud").innerHTML = `<b>${state.world.title}</b>`;
   } else if (state.world) {
     const p = camera.position;
     document.getElementById("vpHud").innerHTML =

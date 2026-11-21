@@ -73,6 +73,8 @@ class WorldManager:
     def _persist(self, world: WorldState) -> None:
         wdir = self._wdir(world.world_id)
         (wdir / "world.json").write_text(world.model_dump_json(indent=2))
+        # Persist each revision so Undo survives server restarts
+        (wdir / f"rev_{world.revision}.json").write_text(world.model_dump_json())
         self._worlds[world.world_id] = world
 
     def _load_existing(self) -> None:
@@ -80,7 +82,17 @@ class WorldManager:
             try:
                 w = WorldState.model_validate_json(p.read_text())
                 self._worlds[w.world_id] = w
-                self._snapshots[w.world_id] = [w.model_copy(deep=True)]
+                snaps = []
+                for rp in sorted(p.parent.glob("rev_*.json"), key=lambda x: int(x.stem.split("_")[1])):
+                    if int(rp.stem.split("_")[1]) < w.revision:
+                        try:
+                            snaps.append(WorldState.model_validate_json(rp.read_text()))
+                        except Exception:
+                            pass
+                self._snapshots[w.world_id] = snaps + [w.model_copy(deep=True)]
+                cur = p.parent / f"rev_{w.revision}.json"
+                if not cur.exists():
+                    cur.write_text(w.model_dump_json())
             except Exception:
                 pass
 
@@ -513,7 +525,8 @@ class WorldManager:
         snaps = self._snapshots.get(world_id, [])
         if len(snaps) <= 1:
             return self.get_world(world_id)
-        snaps.pop()
+        popped = snaps.pop()
+        (self._wdir(world_id) / f"rev_{popped.revision}.json").unlink(missing_ok=True)
         restored = snaps[-1].model_copy(deep=True)
         self._persist(restored)
         return restored
