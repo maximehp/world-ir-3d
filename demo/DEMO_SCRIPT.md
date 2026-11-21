@@ -1,6 +1,6 @@
 # WorldIR 3D: 1-minute demo script
 
-**Setup:** server running, open `http://127.0.0.1:8000/#demo=1`. Navigate with **→ / ←** or **1–6**. **I** hides the input panel, **R** rides along, **V** switches to first-person.
+Open the studio and select each saved world from **Worlds**. Use **R** to ride along and **V** for first-person view.
 
 ---
 
