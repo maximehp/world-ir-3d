@@ -176,6 +176,7 @@ const state = {
   keys: new Set(),
   videoTime: 0,
   refFiles: [],
+  ride: null,
 };
 const srcVideoEl = document.getElementById("srcVideo");
 
@@ -307,6 +308,7 @@ async function loadFullWorld(world, resetCam = true) {
   await Promise.all(world.objects.filter(o => o.visible).map(o => mountSingleObject(o, world)));
 
   syncSourceVideo(world);
+  if (state.camMode === "ride") setCameraMode("orbit");
 
   if (resetCam) {
     const sp = world.camera_spawn || [0, 5, 22];
@@ -949,7 +951,176 @@ function setOrbitFromLook(pos, target) {
   updateOrbitCamera();
 }
 
+// ---------------------------------------------------------------------------
+// Ride Along: chase / first-person camera attached to any moving agent
+// (birds, foxes, scooters, cars, boats, lanterns, including video-tracked paths)
+// ---------------------------------------------------------------------------
+const BASE_FOV = 54;
+const RIDE_PROFILES = {
+  bird_flock:        { chase: [3.4, 1.0], eye: 0.12, fwdEye: 0.45, fov: [66, 78] },
+  floating_lanterns: { chase: [3.8, 1.2], eye: 0.2, fwdEye: 0.5, fov: [62, 74] },
+  fox:               { chase: [3.6, 1.5], eye: 0.55, fwdEye: 0.7, fov: [62, 76] },
+  scooter_rider:     { chase: [3.9, 1.6], eye: 1.35, fwdEye: 0.2, fov: [62, 76] },
+  car_driver:        { chase: [5.4, 2.0], eye: 1.25, fwdEye: 0.3, fov: [60, 74] },
+  boat_cruiser:      { chase: [7.5, 3.0], eye: 1.7, fwdEye: 0.4, fov: [60, 72] },
+};
+
+function rideableAgents() {
+  return [...state.runtimes.values()].filter(rt => rt.spec.carrier === "articulated_agent" && rt.spec.visible !== false);
+}
+
+// Returns {pos} of the agent's lead body (first visible flock member / vehicle), or null if not currently on screen
+function rideSubjectPosition(rt) {
+  const g = rt.group;
+  const members = g.userData.flockMembers || g.userData.lanternMembers;
+  const out = new THREE.Vector3();
+  if (members) {
+    const r = state.ride;
+    let m = members[r.memberIdx % members.length];
+    if (!m || !m.visible) {
+      const idx = members.findIndex(x => x.visible);
+      if (idx < 0) return null;
+      r.memberIdx = idx;
+      m = members[idx];
+    }
+    state.ride.body = m;
+    return m.getWorldPosition(out);
+  }
+  if (!g.visible) return null;
+  state.ride.body = g;
+  return g.getWorldPosition(out);
+}
+
+// First-person: hide the rider's own body from the camera (layer 1 is never rendered)
+function setRideBodyHidden(obj) {
+  const r = state.ride;
+  if (r && r.hiddenBody && r.hiddenBody !== obj) {
+    r.hiddenBody.traverse(n => n.layers.set(0));
+    r.hiddenBody = null;
+  }
+  if (r && obj && r.hiddenBody !== obj) {
+    obj.traverse(n => n.layers.set(1));
+    r.hiddenBody = obj;
+  }
+}
+
+function startRide(objectId) {
+  const agents = rideableAgents();
+  if (!agents.length) return false;
+  let rt = objectId && state.runtimes.get(objectId);
+  if (!rt || rt.spec.carrier !== "articulated_agent") rt = agents[0];
+  if (document.pointerLockElement === canvas && document.exitPointerLock) document.exitPointerLock();
+  state.camMode = "ride";
+  document.getElementById("btnOrbitMode").classList.remove("active");
+  document.getElementById("btnWalkMode").classList.remove("active");
+  document.getElementById("btnRide").classList.add("active");
+  state.ride = {
+    id: rt.spec.id,
+    view: state.ride?.view || "chase",
+    memberIdx: 0,
+    prevPos: null,
+    fwd: new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).setY(0).normalize(),
+    lookAt: camera.position.clone().add(new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion)),
+    speed: 0,
+    zoom: 1,
+    yawOff: 0,
+    pitchOff: 0,
+  };
+  selectObject(rt.spec.id);
+  return true;
+}
+
+function stopRide() {
+  setRideBodyHidden(null);
+  state.ride = null;
+  document.getElementById("btnRide")?.classList.remove("active");
+  camera.fov = BASE_FOV;
+  camera.updateProjectionMatrix();
+}
+
+function cycleRide(step = 1) {
+  const agents = rideableAgents();
+  if (!agents.length || !state.ride) return;
+  const i = agents.findIndex(rt => rt.spec.id === state.ride.id);
+  const next = agents[(i + step + agents.length) % agents.length];
+  setRideBodyHidden(null);
+  state.ride.id = next.spec.id;
+  state.ride.memberIdx = 0;
+  state.ride.prevPos = null;
+  selectObject(next.spec.id);
+}
+
+function updateRideCamera(dt) {
+  const r = state.ride;
+  const rt = r && state.runtimes.get(r.id);
+  if (!rt) { setCameraMode("orbit"); return; }
+  const pos = rideSubjectPosition(rt);
+  r.waiting = !pos;
+  if (!pos) return; // tracked object is off-screen in the source video right now: hold the shot
+
+  // Heading from motion (smoothed); keep the last heading when stationary / perched
+  if (r.prevPos) {
+    const d = pos.clone().sub(r.prevPos);
+    const dist = d.length();
+    if (dist > 4) { r.prevPos = pos.clone(); return; } // video loop wrapped: teleport, don't streak
+    r.speed = THREE.MathUtils.lerp(r.speed, dist / Math.max(dt, 1e-4), Math.min(1, dt * 3));
+    if (dist > 1e-4) r.fwd.lerp(d.normalize(), Math.min(1, dt * 3.5)).normalize();
+  }
+  r.prevPos = pos.clone();
+
+  const prof = RIDE_PROFILES[rt.spec.agent?.rig_kind] || RIDE_PROFILES.fox;
+  const scale = (rt.spec.agent?.entity_scale || 1) * (rt.spec.scale || 1);
+  const up = new THREE.Vector3(0, 1, 0);
+  const flat = r.fwd.clone().setY(0);
+  if (flat.lengthSq() < 1e-6) flat.set(0, 0, -1);
+  flat.normalize();
+  // Mouse-drag look-around offsets
+  const look = flat.clone().applyAxisAngle(up, r.yawOff);
+  look.y = r.fwd.y * 0.6 + r.pitchOff;
+  look.normalize();
+
+  setRideBodyHidden(r.view === "pov" ? r.body : null);
+  let desiredPos, desiredLook, fov;
+  if (r.view === "pov") {
+    desiredPos = pos.clone().addScaledVector(up, prof.eye * scale).addScaledVector(flat, prof.fwdEye * scale);
+    desiredLook = desiredPos.clone().addScaledVector(look, 12);
+    fov = prof.fov[1];
+  } else {
+    const [back, height] = prof.chase;
+    desiredPos = pos.clone().addScaledVector(look, -back * scale * r.zoom).addScaledVector(up, height * scale * r.zoom);
+    desiredLook = pos.clone().addScaledVector(look, 3.5 * scale).addScaledVector(up, 0.3 * scale);
+    fov = prof.fov[0];
+  }
+  if (state.world) {
+    const gh = sampleTerrainHeight(state.world.terrain, desiredPos.x, desiredPos.z);
+    const floor = Math.max(gh, state.world.terrain.has_water ? state.world.terrain.water_level : -99) + 0.35;
+    if (desiredPos.y < floor) desiredPos.y = floor;
+  }
+  const isFlyer = Boolean(rt.group.userData.flockMembers || rt.group.userData.lanternMembers);
+  const kPos = 1 - Math.exp(-dt * (r.view === "pov" ? 14 : isFlyer ? 5 : 8));
+  const kLook = 1 - Math.exp(-dt * (r.view === "pov" ? 12 : 7));
+  camera.position.lerp(desiredPos, kPos);
+  r.lookAt.lerp(desiredLook, kLook);
+  camera.lookAt(r.lookAt);
+  if (Math.abs(camera.fov - fov) > 0.05) {
+    camera.fov = THREE.MathUtils.lerp(camera.fov, fov, Math.min(1, dt * 3));
+    camera.updateProjectionMatrix();
+  }
+}
+
+function rideHudHtml() {
+  const r = state.ride;
+  const rt = state.runtimes.get(r.id);
+  const name = rt ? rt.spec.name : r.id;
+  const tracked = rt?.spec.behavior?.kind === "follow_video_path" ? " · 🎬 video-tracked path" : "";
+  const status = r.waiting ? `<span style="color:#f5b14c;">waiting for it to re-enter the video frame…</span>` : `${(r.speed * 3.6).toFixed(0)} km/h`;
+  return `<b>🎥 Riding: ${name}</b> · ${r.view === "pov" ? "FIRST-PERSON" : "CHASE"}${tracked}<br/>` +
+    `${status}<br/>` +
+    `<b>V</b> switch view · <b>N</b>/<b>B</b> next/prev agent · drag look · scroll zoom · <b>Esc</b> exit`;
+}
+
 function setCameraMode(mode) {
+  if (state.ride) stopRide();
   state.camMode = mode;
   document.getElementById("btnOrbitMode").classList.toggle("active", mode === "orbit");
   document.getElementById("btnWalkMode").classList.toggle("active", mode === "walk");
@@ -1027,6 +1198,14 @@ window.addEventListener("mousemove", e => {
     lastMX = e.clientX; lastMY = e.clientY;
     return;
   }
+  if (state.camMode === "ride") {
+    if (dragBtn === 0 && state.ride) {
+      state.ride.yawOff -= (e.clientX - lastMX) * 0.005;
+      state.ride.pitchOff = THREE.MathUtils.clamp(state.ride.pitchOff - (e.clientY - lastMY) * 0.004, -0.9, 0.9);
+    }
+    lastMX = e.clientX; lastMY = e.clientY;
+    return;
+  }
   if (dragBtn === 0) {
     const dx = e.clientX - lastMX;
     const dy = e.clientY - lastMY;
@@ -1050,12 +1229,21 @@ canvas.addEventListener("wheel", e => {
   if (state.camMode === "orbit") {
     state.orbitDist = THREE.MathUtils.clamp(state.orbitDist * (1 + e.deltaY * 0.001), 2.5, 72);
     updateOrbitCamera();
+  } else if (state.camMode === "ride" && state.ride) {
+    state.ride.zoom = THREE.MathUtils.clamp(state.ride.zoom * (1 + e.deltaY * 0.001), 0.5, 3.5);
   }
 }, { passive: false });
 
 window.addEventListener("keydown", e => {
   if (document.activeElement && ["TEXTAREA", "INPUT"].includes(document.activeElement.tagName)) return;
   if (e.code === "KeyF") { setCameraMode(state.camMode === "walk" ? "orbit" : "walk"); return; }
+  if (e.code === "KeyR" && state.camMode !== "ride") { startRide(state.selectedId); return; }
+  if (state.camMode === "ride") {
+    if (e.code === "Escape") { setCameraMode("orbit"); return; }
+    if (e.code === "KeyV") { state.ride.view = state.ride.view === "pov" ? "chase" : "pov"; state.ride.yawOff = 0; state.ride.pitchOff = 0; return; }
+    if (e.code === "KeyN") { cycleRide(1); return; }
+    if (e.code === "KeyB") { cycleRide(-1); return; }
+  }
   state.keys.add(e.code);
 });
 window.addEventListener("keyup", e => state.keys.delete(e.code));
@@ -1204,8 +1392,11 @@ function renderSidebars() {
       row.innerHTML = `
         <span class="obj-name" title="${o.id}${behIcon}">${o.name}<span style="color:var(--muted); font-size:10px;"> v${o.version}${behIcon}</span></span>
         <span class="carrier-tag ${tagClass}">${tagTxt}</span>
+        ${o.carrier === "articulated_agent" ? `<button type="button" class="ride-btn" title="Ride along with ${o.name}">🎥 Ride</button>` : ""}
       `;
       row.onclick = () => selectObject(o.id);
+      const rb = row.querySelector(".ride-btn");
+      if (rb) rb.onclick = ev => { ev.stopPropagation(); startRide(o.id); };
       row.ondblclick = () => inspectObject(o.id);
       grp.appendChild(row);
     }
@@ -1568,12 +1759,23 @@ function setPlanView() {
   setOrbitFromLook(new THREE.Vector3(0, half * 1.9, 1.2), new THREE.Vector3(0, 0, 0));
 }
 document.getElementById("btnCamPlan").onclick = setPlanView;
+document.getElementById("btnRide").onclick = () => {
+  if (state.camMode === "ride") setCameraMode("orbit");
+  else if (!startRide(state.selectedId)) document.getElementById("vpHud").textContent = "No moving agents in this world to ride.";
+};
 // Linkable views: #view=plan | aerial | video
-function applyHashView() {
-  const v = new URLSearchParams(location.hash.slice(1)).get("view");
+async function applyHashView() {
+  const hp = new URLSearchParams(location.hash.slice(1));
+  const v = hp.get("view");
+  const wid = hp.get("world");
+  if (wid && state.world?.world_id !== wid) {
+    const r = await fetch(`/api/worlds/${wid}`);
+    if (r.ok) { await loadFullWorld(await r.json(), true); refreshWorldsList(); }
+  }
   if (v === "plan") setPlanView();
   else if (v === "aerial") document.getElementById("btnCamOverview").click();
   else if (v === "video") document.getElementById("btnCamVideo").click();
+  else if (v === "ride" || v === "ride-pov") { startRide(hp.get("agent")); if (state.ride && v === "ride-pov") state.ride.view = "pov"; }
 }
 window.addEventListener("hashchange", applyHashView);
 document.getElementById("btnCamInspect").onclick = () => {
@@ -1627,8 +1829,11 @@ function animate(now) {
     state.videoTime = srcVideoEl.readyState >= 2 ? srcVideoEl.currentTime : (state.videoTime + dt) % Math.max(sv.duration, 0.5);
   }
   updateAutonomousWorld(elapsed, dt);
+  if (state.camMode === "ride") updateRideCamera(dt);
 
-  if (state.world) {
+  if (state.world && state.camMode === "ride" && state.ride) {
+    document.getElementById("vpHud").innerHTML = rideHudHtml();
+  } else if (state.world) {
     const p = camera.position;
     document.getElementById("vpHud").innerHTML =
       `<b>${state.world.title}</b> [Rev ${state.world.revision}] · Mode: <b>${state.camMode.toUpperCase()}</b><br/>` +

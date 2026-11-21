@@ -230,6 +230,8 @@
     }
     .obj-row:hover { border-color: #32415c; }
     .obj-row.selected { border-color: var(--accent); background: #13283c; }
+    .ride-btn { padding: 1px 6px; font-size: 10.5px; margin-left: 4px; flex: none; }
+    #btnRide.active { border-color: var(--accent); color: var(--accent); }
     .obj-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .carrier-tag {
       font-family: ui-monospace, monospace;
@@ -400,6 +402,7 @@
         <button id="btnCamFront">Front</button>
         <button id="btnCamBack">180° Back</button>
         <button id="btnCamOverview">Aerial 3/4</button>
+        <button id="btnRide" title="Ride along with the selected (or first) moving agent · R">🎥 Ride Along</button>
         <button id="btnCamPlan" title="Top-down view: compare against a floor / site plan">Plan View</button>
         <button id="btnCamVideo" title="Match the original video camera" hidden>Video Camera</button>
         <button id="btnCamInspect" title="Orbit close around currently selected object">Inspect Selected</button>

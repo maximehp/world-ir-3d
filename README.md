@@ -43,6 +43,10 @@ Conflicts resolve as: the prompt decides **what**, plans decide **where**, mood 
 
 API: `POST /api/worlds/compose` (multipart `prompt`, `images[]`), `POST /api/worlds/{id}/edit-with-images` (`instruction`, `selected_object_id`, `images[]`); `/api/worlds/from-video` also accepts `images[]`.
 
+## Ride Along
+
+Click **🎥 Ride Along** (or press **R**, or the 🎥 button on any agent in the Outliner) to attach the camera to a moving agent: birds, foxes, scooters, cars, boats, lanterns, including agents replaying **video-tracked paths**. **V** toggles chase / first-person (the rider's own body is hidden), **N/B** cycles agents, drag to look around, scroll to zoom, **Esc** exits. The HUD shows live speed. Linkable: `#world=<id>&view=ride&agent=<object_id>` (or `view=ride-pov`).
+
 ## Quick Start (merged prototype)
 
 ```bash
