@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WorldIR 3D — Persistent Multi-Carrier Generative 3D World Studio</title>
+  <style>
+    :root {
+      --bg: #090b10;
+      --panel: #11151e;
+      --panel2: #171d2a;
+      --border: #242d3f;
+      --text: #e6ecf8;
+      --muted: #8b96ae;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --purple: #a78bfa;
+      --amber: #fbbf24;
+      --red: #f87171;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 12.5px;
+      height: 100vh;
+      display: grid;
+      grid-template-rows: 44px 1fr;
+      overflow: hidden;
+    }
+    header {
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 14px;
+      gap: 10px;
+    }
+    .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+    .pill {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 10.5px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      background: var(--panel2);
+      color: var(--muted);
+    }
+    .pill.c { border-color: #264d73; color: var(--accent); }
+    .pill.h { border-color: #4a3573; color: var(--purple); }
+    .pill.g { border-color: #1f5c47; color: var(--green); }
+    .pill.w { border-color: #6b4e1e; color: var(--amber); }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: 300px 1fr 310px;
+      min-height: 0;
+      overflow: hidden;
+    }
+    .sidebar {
+      background: var(--panel);
+      overflow-y: auto;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .sidebar.left { border-right: 1px solid var(--border); }
+    .sidebar.right { border-left: 1px solid var(--border); }
+
+    .viewport-wrap {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #06080d;
+    }
+    #viewport3d {
+      width: 100%;
+      height: 100%;
+      display: block;
+      outline: none;
+    }
+    .vp-hud {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(9, 11, 16, 0.78);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 6px;
+      padding: 7px 10px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      line-height: 1.45;
+      pointer-events: none;
+      max-width: 440px;
+    }
+    .vp-controls {
+      position: absolute;
+      bottom: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 6px;
+      background: rgba(12, 16, 24, 0.86);
+      border: 1px solid var(--border);
+      padding: 6px 8px;
+      border-radius: 8px;
+      backdrop-filter: blur(8px);
+    }
+    .vp-controls button { padding: 5px 9px; font-size: 11.5px; }
+
+    .card {
+      background: var(--panel2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 9px;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+    .card-title {
+      font-size: 10.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    textarea, input[type="text"] {
+      width: 100%;
+      background: #0b0e14;
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 5px;
+      padding: 7px 8px;
+      font-family: inherit;
+      font-size: 12px;
+      resize: vertical;
+    }
+    textarea:focus { outline: none; border-color: var(--accent); }
+    button {
+      background: #1c2436;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 6px 9px;
+      font-size: 11.5px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    button:hover:not(:disabled) { border-color: var(--accent); background: #233048; }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    button.primary { background: #144b70; border-color: var(--accent); color: #fff; }
+    button.primary:hover:not(:disabled) { background: #185e8c; }
+    button.active { background: #164462; border-color: var(--accent); color: #fff; }
+
+    .row { display: flex; gap: 6px; align-items: center; }
+    .row > * { flex: 1; }
+    .wrap { display: flex; flex-wrap: wrap; gap: 5px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+    .status { font-family: ui-monospace, monospace; font-size: 11px; color: var(--accent); min-height: 14px; line-height: 1.35; }
+
+    /* Blender-style Collection Outliner */
+    .collection-group { display: flex; flex-direction: column; gap: 3px; }
+    .collection-hdr {
+      font-size: 10.5px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      padding: 2px 4px;
+      letter-spacing: 0.05em;
+    }
+    .obj-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      padding: 5px 7px;
+      border-radius: 4px;
+      background: #0e121a;
+      border: 1px solid transparent;
+      cursor: pointer;
+    }
+    .obj-row:hover { border-color: #32415c; }
+    .obj-row.selected { border-color: var(--accent); background: #13283c; }
+    .obj-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .carrier-tag {
+      font-family: ui-monospace, monospace;
+      font-size: 9.5px;
+      padding: 1px 5px;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+    .tag-sdf { background: #36224f; color: #d8b4fe; }
+    .tag-agent { background: #173d31; color: #6ee7b7; }
+    .tag-param { background: #1b2f47; color: #93c5fd; }
+
+    .kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+    .kpi { background: #0c1017; border: 1px solid var(--border); border-radius: 4px; padding: 5px; text-align: center; }
+    .kpi .v { font-size: 14px; font-weight: 700; font-family: ui-monospace, monospace; }
+    .kpi .k { font-size: 9.5px; color: var(--muted); }
+
+    .rev-item {
+      background: #0d1119;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 7px;
+      font-size: 11px;
+      line-height: 1.4;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .audit-img {
+      width: 100%;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      cursor: pointer;
+    }
+    .world-chip {
+      padding: 6px 8px;
+      background: #0d1119;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    .world-chip.active { border-color: var(--accent); background: #13283c; }
+
+    .modal {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.85);
+      display: none; align-items: center; justify-content: center; z-index: 100; padding: 20px;
+    }
+    .modal.open { display: flex; }
+    .modal-box {
+      max-width: 90vw; max-height: 92vh; background: var(--panel);
+      border: 1px solid var(--border); border-radius: 8px; padding: 12px;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .modal-box img { max-width: 100%; max-height: 78vh; object-fit: contain; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span>WorldIR 3D</span>
+      <span class="pill">Full 3D Hybrid Multi-Carrier Engine</span>
+      <span class="pill c">Carbon: World &amp; Diff Compiler</span>
+      <span class="pill h">Hydrogen: 4-View 3D Auditor</span>
+      <span class="pill">Nano Banana: Seamless PBR</span>
+    </div>
+    <div class="wrap">
+      <span id="localityBadge" class="pill g">Persistent 3D Scene Graph</span>
+      <span id="fpsBadge" class="pill">-- FPS</span>
+    </div>
+  </header>
+
+  <div class="workspace">
+    <!-- LEFT: Generate World + Surgical Chat Edits + Saved Worlds -->
+    <aside class="sidebar left">
+      <div class="card">
+        <div class="card-title">1. Generate Full 3D World</div>
+        <textarea id="worldPrompt" rows="3" placeholder="Describe any small 3D world with buildings, landmarks, organic sculptures, and moving creatures/vehicles..."></textarea>
+        <div class="wrap">
+          <button type="button" class="preset-btn" data-p="A sunlit Mediterranean hill village plaza with a central tiered stone fountain, a tall stone clock tower, four cozy terracotta cottages with balconies, cypress trees, a carved marble owl statue on a pedestal, a red vintage scooter patrolling the plaza, and a flock of blue birds circling and landing on the clock tower roof.">Mediterranean Village</button>
+          <button type="button" class="preset-btn" data-p="A misty Nordic harbor cove at golden hour with a red-and-white lighthouse, timber fishing cottages, a stone archway, pine trees, a wooden windmill with spinning sails, a sculptural mossy sea-serpent rock monument, a sailboat cruising the water, and white seabirds circling the lighthouse.">Nordic Harbor</button>
+          <button type="button" class="preset-btn" data-p="A twilight lantern garden courtyard with a central carved stone archway, a tranquil pavilion gazebo, cherry blossom trees, warm iron lampposts, an organic sculpted glowing crystal lotus fountain centerpiece, a red fox trotting around the courtyard, and floating paper lanterns drifting above the gazebo.">Twilight Lantern Garden</button>
+        </div>
+        <button id="btnGenerate" class="primary">Compile 3D World</button>
+        <div id="genStatus" class="status"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">
+          <span>2. Surgical Chat Modification</span>
+          <button id="btnUndo" style="padding:2px 7px; font-size:10.5px;">Undo (0 calls)</button>
+        </div>
+        <div id="selectedHint" class="mono" style="color:var(--muted);">Selected: none (click any 3D object or Outliner item)</div>
+        <textarea id="chatEdit" rows="2" placeholder="e.g. 'Make the birds circle the fountain instead' / 'Turn the clock tower into mossy obsidian brick' / 'Switch to moonlit night' / 'Add a marble fox statue'"></textarea>
+        <div class="wrap">
+          <button type="button" class="edit-chip" data-e="Make the birds circle and land on the central fountain instead of the tower.">Birds → Fountain</button>
+          <button type="button" class="edit-chip" data-e="Change the clock tower walls to weathered mossy dark obsidian stone with bright amber glowing windows.">Restyle Tower PBR</button>
+          <button type="button" class="edit-chip" data-e="Switch the atmosphere to moonlit night with warm glowing cottage windows and bright lampposts.">Moonlit Night</button>
+          <button type="button" class="edit-chip" data-e="Add a smooth carved emerald jade fox statue on a stone pedestal near the plaza edge.">Add SDF Statue</button>
+        </div>
+        <button id="btnApplyEdit" class="primary">Apply Localized Edit</button>
+        <div id="editStatus" class="status"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Saved 3D Worlds</div>
+        <div id="worldsList" style="display:flex; flex-direction:column; gap:5px;">
+          <div style="color:var(--muted);">No worlds generated yet.</div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- CENTER: Interactive Full 3D WebGL2 Viewport -->
+    <main class="viewport-wrap">
+      <canvas id="viewport3d"></canvas>
+      <div class="vp-hud" id="vpHud">
+        <b>WorldIR 3D Viewport</b><br/>
+        Orbit: Left-drag rotate · Right-drag pan · Scroll zoom · Click object to select<br/>
+        Walk Mode (WASD): Press <b>F</b> or click Walk Mode · Mouse look · Space/Shift fly
+      </div>
+      <div class="vp-controls">
+        <button id="btnOrbitMode" class="active">Orbit Camera</button>
+        <button id="btnWalkMode">Walk Mode (WASD + Look)</button>
+        <button id="btnCamFront">Front</button>
+        <button id="btnCamBack">180° Back</button>
+        <button id="btnCamOverview">Aerial 3/4</button>
+        <button id="btnCamInspect" title="Orbit close around currently selected object">Inspect Selected</button>
+        <button id="btnRunAudit" class="primary">Run 4-View Hydrogen Audit</button>
+      </div>
+    </main>
+
+    <!-- RIGHT: Blender-Style Collection Outliner + Hydrogen 4-View Audit + Revision Ledger -->
+    <aside class="sidebar right">
+      <div class="card">
+        <div class="card-title">
+          <span>Scene Collections (Outliner)</span>
+          <span id="objCountBadge" class="pill">0 objs</span>
+        </div>
+        <div id="outliner" style="display:flex; flex-direction:column; gap:6px; max-height:250px; overflow-y:auto;">
+          <div style="color:var(--muted);">Compile a world to inspect collections &amp; carriers.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">
+          <span>Gemini 4 Hydrogen — 4-View 3D Audit</span>
+          <span id="auditBadge" class="pill">--</span>
+        </div>
+        <div id="auditBox" style="color:var(--muted); font-size:11.5px; line-height:1.4;">
+          Renders Overview, Front, Opposite 180° Back, and Close-Up angles from the live 3D scene for independent inspection.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Cumulative Neural &amp; Compiler Ledger</div>
+        <div class="kpi-grid">
+          <div class="kpi"><div class="v" style="color:var(--accent);" id="kpiCarbon">0</div><div class="k">G4 Carbon</div></div>
+          <div class="kpi"><div class="v" style="color:var(--purple);" id="kpiHydrogen">0</div><div class="k">G4 Hydrogen</div></div>
+          <div class="kpi"><div class="v" style="color:var(--amber);" id="kpiNB">0</div><div class="k">NB PBR Tex</div></div>
+          <div class="kpi"><div class="v" style="color:var(--purple);" id="kpiSDF">0</div><div class="k">SDF Meshes</div></div>
+          <div class="kpi"><div class="v" style="color:var(--green);" id="kpiRev">0</div><div class="k">Revisions</div></div>
+          <div class="kpi"><div class="v" id="kpiPreserved">--</div><div class="k">Last Preserved</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Persistent Edit History</div>
+        <div id="historyBox" style="display:flex; flex-direction:column; gap:6px;"></div>
+      </div>
+    </aside>
+  </div>
+
+  <div id="modal" class="modal">
+    <div class="modal-box">
+      <div class="row" style="justify-content:space-between;">
+        <span id="modalTitle" class="mono"></span>
+        <button id="modalClose" style="flex:0;">Close</button>
+      </div>
+      <img id="modalImg" />
+    </div>
+  </div>
+
+  <script type="module" src="/static/studio.js"></script>
+</body>
+</html>
