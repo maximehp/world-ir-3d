@@ -1031,6 +1031,57 @@ function buildArchway(obj, texturesDict) {
   return enableShadows(g);
 }
 
+// Low humpback footbridge: an arched walking deck spanning `width` along local X, with parapets and a voussoir arch underneath.
+function buildFootbridge(obj, texturesDict) {
+  const p = obj.parametric;
+  const g = new THREE.Group();
+  const span = Math.max(2.4, p.width || 5.0);
+  const rise = THREE.MathUtils.clamp(p.height || span * 0.22, 0.4, span * 0.4);
+  const deckW = Math.max(0.9, p.depth || 1.6);
+  const mat = createPBRMaterial(obj.material, texturesDict, { repeat: 1.6, normalStrength: 1.2, emissiveRole: "body" });
+  const trim = createPBRMaterial(obj.material, texturesDict, { overrideColor: obj.material.secondary_color || "#8d8272", repeat: 1.2, tintWeight: 0.5, emissiveRole: "trim" });
+
+  const deckThick = 0.22;
+  const parapetH = 0.42, parapetT = 0.16;
+  const N = 14;
+  const yAt = (x) => rise * Math.cos((Math.PI * x) / span) + 0.12; // 0.12 at the banks, rise at the crown
+  for (let i = 0; i < N; i++) {
+    const x0 = -span / 2 + (span * i) / N, x1 = -span / 2 + (span * (i + 1)) / N;
+    const y0 = yAt(x0), y1 = yAt(x1);
+    const len = Math.hypot(x1 - x0, y1 - y0) + 0.02;
+    const ang = Math.atan2(y1 - y0, x1 - x0);
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+    const deck = new THREE.Mesh(new THREE.BoxGeometry(len, deckThick, deckW), mat);
+    deck.position.set(cx, cy, 0);
+    deck.rotation.z = ang;
+    g.add(deck);
+    for (const sz of [-1, 1]) {
+      const par = new THREE.Mesh(new THREE.BoxGeometry(len, parapetH, parapetT), trim);
+      const off = deckThick / 2 + parapetH / 2;
+      par.position.set(cx - Math.sin(ang) * off, cy + Math.cos(ang) * off, sz * (deckW / 2 - parapetT / 2));
+      par.rotation.z = ang;
+      g.add(par);
+    }
+    // spandrel fill under the deck down to the water line, thinning toward the arch crown
+    const fillH = Math.max(0.05, Math.min(y0, y1) - 0.02);
+    const crownGap = rise * 0.75 * Math.cos((Math.PI * cx) / span);
+    const h = Math.max(0.05, fillH - Math.max(0, crownGap));
+    if (h > 0.08) {
+      const fill = new THREE.Mesh(new THREE.BoxGeometry(span / N + 0.02, h, deckW * 0.94), mat);
+      fill.position.set(cx, Math.min(y0, y1) - h / 2, 0);
+      g.add(fill);
+    }
+  }
+  // end posts / newels
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.26, parapetH + 0.3, 0.26), trim);
+    post.position.set(sx * (span / 2 - 0.1), 0.12 + (parapetH + 0.3) / 2, sz * (deckW / 2 - parapetT / 2));
+    g.add(post);
+  }
+  addContactAO(g, span * 0.55, deckW * 0.7, 0.4);
+  return enableShadows(g);
+}
+
 function buildLampPost(obj, isNight) {
   const p = obj.parametric;
   const g = new THREE.Group();
@@ -1756,8 +1807,8 @@ export function buildParametricObject(obj, texturesDict, isNight) {
     case "platform": return buildPlatform(obj, texturesDict);
     case "fountain": return buildFountain(obj, texturesDict);
     case "tree": return buildTree(obj);
-    case "archway":
-    case "bridge": return buildArchway(obj, texturesDict);
+    case "archway": return buildArchway(obj, texturesDict);
+    case "bridge": return buildFootbridge(obj, texturesDict);
     case "lamp_post": return buildLampPost(obj, isNight);
     case "market_stall": return buildMarketStall(obj);
     case "bench": return buildBench(obj);

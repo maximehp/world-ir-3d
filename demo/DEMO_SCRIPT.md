@@ -13,8 +13,8 @@ Open the studio and select each saved world from **Worlds**. Use **R** to ride a
 **[3 · Plan + Photo]** (~12s)
 "Now a real landmark. We gave it a site plan, a photo and one line of text. The plan decides *where* things go, the photo decides *how they look*." *(click Plan View: it matches the drawing)*
 
-**[4 · Neon] → [5 · Reclaimed] → [6 · Lava]** (~15s)
-"And because it's a real world, not a picture, we can remix it. One mood board: Neon Agra 2099. Another: five hundred years later, reclaimed by the jungle. Another: forged from a volcano. Same layout, same objects. Only the style changes."
+**[4 · Neon] → [5 · Reclaimed] → [6 · Festival of Lights] → [7 · Spring Bloom]** (~15s)
+"And because it's a real world, not a picture, we can remix it. One mood board: Neon Agra 2099. Another: five hundred years later, reclaimed by the jungle. Diwali night, lit by thousands of diyas. A Mughal garden in full spring bloom. Same layout, same monument. Only the story changes."
 
 **Architecture** (~13s)
 "Under the hood: Gemini compiles every input into **WorldIR**, a typed scene graph. That graph is built from four kinds of geometry: terrain, parametric architecture, sculpted SDF meshes, and animated agents. Nano Banana generates the textures, and edits are surgical diffs with instant undo. Three.js renders it live in the browser."
