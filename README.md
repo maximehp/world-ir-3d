@@ -1,5 +1,9 @@
 # WorldIR 3D — Persistent Multi-Carrier Generative 3D World Engine
 
+[![WorldIR 3D demo video: click to play](docs/media/worldir-3d-brag.jpg)](docs/media/worldir-3d-brag.mp4)
+
+▶️ **[Watch the demo video](docs/media/worldir-3d-brag.mp4)**: type a sentence, remix it with a mood board, or rebuild a 2D video as a walkable 3D world.
+
 A full-3D generative world representation and live WebGL2 studio where worlds are compiled into persistent, Blender-style object collections rather than flat 2D/2.5D pixel sequences. Every viewpoint, camera path, and surgical chat edit operates directly on persistent 3D state.
 
 ## Architecture Overview
